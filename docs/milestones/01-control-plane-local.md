@@ -57,6 +57,19 @@ These are known defects found during research. Each has bitten someone already.
 - **B1** — verify `casing: snake_case` × better-auth **before** writing migration 0002.
 - **No child-facing surface anywhere.** T4 §10.5's "Ask for more time" button is withdrawn.
 
+## Dev environment (decided 2026-09-18)
+
+Everything through phase 4 runs on the **MacBook Air, entirely local** — Docker Postgres, `apps/api`
+and `apps/web` on localhost, and the agent pointed at `localhost`. That the agent does not care
+whether its control plane is local or in the cluster is hypothesis **H1** paying off.
+
+The Arch desktop stays the **deploy** target (phase 5). It cannot host a macOS test VM — arm64 macOS
+virtualizes only on Apple Silicon hosts — so no macOS work moves there regardless of its specs.
+
+Enforcement is developed with the **shutdown rung stubbed at compile time** (see the dev-mode
+corollary in `../design-decisions.md`). Warnings, lock and the grace timer are exercised for real on
+the Air. One scheduled end-to-end on the Mac mini closes it out, once.
+
 ## Out of scope
 
 The agent (phase 3), the parent UI (phase 4), and everything cluster-dependent (phase 5 — Helm,

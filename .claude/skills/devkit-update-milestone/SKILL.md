@@ -9,7 +9,12 @@ Append progress notes to the active milestone file under `docs/milestones/`. Opt
 ## Identify the active milestone
 
 1. List `docs/milestones/NN-*.md` files.
-2. The active milestone is the highest-numbered file whose `status:` frontmatter is not `done`. (If frontmatter is missing, treat the highest-numbered file as active.)
+2. The active milestone is the **lowest-numbered file whose `status:` frontmatter is `open`**. (If no file is `open`, there is no active milestone — report that. If frontmatter is missing, treat the lowest-numbered file as active.)
+
+   > **Local convention, differs from stock devkit.** This project planned its full roadmap up front, so
+   > `docs/milestones/` holds several files at once. `status: planned` means written but not started;
+   > `status: open` means in progress; `status: done` means shipped. Exactly one file should be `open`.
+   > The stock rule (highest-numbered non-`done`) would select the *last* milestone here, which is wrong.
 3. If no milestone files exist, do nothing. Report: "no active milestone — nothing to update."
 
 ## Append a progress note

@@ -2561,3 +2561,42 @@ not exist** in D.3.
 Six levers now. Five were caught by audit, one was written into the spec *after* the invariant was
 declared — by an author who had read it. **Assume the seventh is already in the code you are about to
 write**, and run the standing test on every branch in the enforcement path.
+
+---
+
+## ⚠️ Invariant E — the dev-mode corollary (2026-09-18)
+
+Enforcement is developed on the owner's MacBook Air, not the target Mac mini — the mini is in another
+room and in constant use. The terminal `shutdown` rung is therefore stubbed during development.
+
+**This is lever #7 if implemented carelessly.** A runtime switch that skips enforcement is exactly the
+shape of X1, X8 and X10, and on a machine where the child has admin it is a one-line bypass.
+
+### Ruled: the stub is compile-time only
+
+- Enforcement actions sit behind an `EnforcementBackend` protocol.
+- The recording backend is guarded by a compilation condition (`#if DEV_ENFORCEMENT`) and **is not
+  compiled into release builds**.
+- **No environment variable, no plist key, no config field selects it.** If it can be chosen at
+  runtime it is a bypass, regardless of how it is named or documented.
+- Release verification is mechanical, alongside the existing `otool -L` check that proves the enforcer
+  links no networking: the shipped binary must contain **no symbol path** reaching the recording
+  backend.
+
+### What this leaves genuinely untested
+
+| Rung | Dev coverage on the Air |
+|---|---|
+| Warnings | ✅ real — both surfaces proven on this hardware (§2 #12, #13) |
+| Lock | ✅ real — costs a password, destroys nothing |
+| 300 s grace | ✅ real |
+| Shutdown | 🔷 recorded intent only |
+
+The residual risk is **one line**: whether the Swift code correctly invokes `/sbin/shutdown`. The
+primitive itself is already proven — POC 1's `test_shutdown.sh` performed a real power-off on this
+same OS build. The *ladder as a sequence* is fully testable with the call stubbed, by asserting the
+decision fired at the correct moment.
+
+**Exit condition:** one scheduled end-to-end run on the actual Mac mini, with the real backend, before
+production trust. Once — not a dev loop. `sudo killall shutdown` aborts a scheduled
+`shutdown -h +N` if it goes wrong (POC 1 §8).
