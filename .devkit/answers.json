@@ -1,0 +1,23 @@
+{
+  "project_name": "homeparentcontrol",
+  "project_tagline": "Self-hosted parental control for a child's Mac: a headless Swift agent enforces screen-time rules on the target machine, and a k3s-deployed web app gives the parent rules, monitoring and reporting.",
+  "primary_language": "typescript",
+  "package_manager": "pnpm",
+  "today": "2026-09-18",
+  "languages": ["typescript", "swift"],
+  "lint": { "typescript": "biome", "swift": "swiftlint" },
+  "test": { "typescript": "vitest", "swift": "xctest" },
+  "typecheck": { "typescript": "tsc", "swift": "swiftc" },
+  "architecture_sketch": "Two deployables plus a shared contract. (1) The AGENT runs on the child's Mac mini (Apple Silicon, macOS 26) as two root LaunchDaemons written in Swift, ad-hoc signed. `enforcerd` ticks every 60s, reads a cached policy from disk, compares wall-clock time-of-day against the bedtime window, warns via osascript banners and a CFUserNotification dialog, then enforces: lock, a 300-second grace period, then shutdown. It has no network code at all -- that is what makes 'bedtime works with the server down' a structural property rather than a promise. `syncd` is the only component that talks to the network: it polls the control plane for desired policy, posts telemetry batches on a separate endpoint, and writes the cached policy to disk for enforcerd. A small supervisor daemon handles updates. (2) The CONTROL PLANE is a standard app in the owner's `home*` family: Hono API, Next.js web UI, Drizzle ORM, Postgres, better-auth, pino, zod, deployed to a single-node k3s cluster via a Helm chart, with GitHub Actions building to GHCR and bumping the image tag in the `arch-infra` GitOps repo for Argo CD to reconcile. Its schema is household -> child -> policy_set -> device: policy is authored per child and compiled per device into an immutable, content-addressed artefact. Telemetry arrives as raw events and is projected into hourly and daily rollups. (3) The CONTRACT between them is agent-initiated only, over the home LAN, with no inbound port on the child's Mac. The agent authenticates with a device-scoped API key sent as x-api-key, hanging off a per-household service user. The server publishes desired state and the agent reconciles toward it; there is no RPC command channel and no verb that stops enforcement. Every relaxation carries a mandatory expires_at, so a stale policy can only converge stricter. Agent logs are structured JSON on stdout, POSTed to the control plane, which forwards them to the existing Loki/Grafana stack. The policy tick doubles as a heartbeat, and the control plane runs a five-state health machine so alerting keys off a presence rather than an absence.",
+  "constraints": "Enforcement must work with the network or server down -- the enforcer holds a cached policy and never blocks on a socket. Fail-open on ignorance, fail-closed on knowledge: if the agent cannot determine the rules it does not lock and alerts within one tick; if it knows the rules but cannot reach the server it enforces as written, indefinitely. No code path inside the enforcer may disable, suspend or skip enforcement -- five separate 'stop enforcing' levers were proposed during research and all were rejected. The child has admin on her Mac and the assessed threat level is low, so tamper resistance is a nice-to-have and misuse should be made visible rather than impossible. No kid-facing UI on the target: warnings and the override prompt are the only on-screen surfaces. No separate mobile app, ever -- every parent surface is the internal web UI in a browser on the home network. Monitoring stays at the permission-free tier (app identity, CPU-gated active time, idle, power and session events); anything richer requires TCC grants that die on every agent rebuild under ad-hoc signing. No paid Apple Developer account, so ad-hoc signing throughout. One child and one Mac today, but the data model must not hardcode identity. Target is Apple Silicon only; all empirical findings are macOS 26.6.2 and macOS 27 is untested. Non-goals: MDM, kernel extensions, Intel Macs, non-Mac devices, window-title or URL capture, and offline override codes (designed but deferred).",
+  "frontend": true,
+  "enabled_plugins": {
+    "context7@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "swift-lsp@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true,
+    "chrome-devtools-mcp@claude-plugins-official": true,
+    "playwright@claude-plugins-official": true
+  },
+  "plugins_missing_install": ["playwright@claude-plugins-official"]
+}

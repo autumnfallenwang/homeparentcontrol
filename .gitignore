@@ -1,0 +1,35 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+.turbo/
+
+# swift / spm
+.build/
+.swiftpm/
+*.xcuserstate
+DerivedData/
+
+# env + secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.mobileprovision
+
+# test + coverage
+coverage/
+*.log
+
+# macos
+.DS_Store
+
+# verification artefacts (tools/verify writes here at runtime)
+/usr/local/var/hpc-verify/
