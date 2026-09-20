@@ -33,3 +33,7 @@ coverage/
 
 # verification artefacts (tools/verify writes here at runtime)
 /usr/local/var/hpc-verify/
+
+# SwiftPM
+agent/.build/
+agent/.swiftpm/

@@ -55,5 +55,23 @@ shutdown on the Mac mini (06)**.
 
 ## Progress
 
+- 2026-09-20: **`HPCCore` scaffolded — the predicate, the DST boundary resolver and the policy
+  decoder, with 37 tests.** Package split so every decision that can leave a Mac usable past bedtime
+  lives in a pure, I/O-free target that is testable without a daemon, a clock or a screen.
+- 2026-09-20: 🔴 **Found lever #7 — in my own code, within the hour.** The milestone's first trap
+  says "assume the seventh is in the code you are about to write", and it was. `Window.days` decoded
+  as `(try? decode) ?? []`, matching the tolerant style of the fields around it — so a malformed
+  `days` produced a window matching **no day**, i.e. a policy that parses cleanly and enforces
+  nothing. It surfaced only because a broken test fixture happened to emit exactly that JSON.
+  **The rule now pinned by `DecodingTests`: tolerate what you do not understand; never default
+  toward less enforcement.** `days`, `windows`, `schedule` and the boundary times are strict and
+  fail the document (so LKG takes over, and §4.6 fails open *loudly* if that fails too). `overrides`
+  stay tolerant, because dropping a relaxation errs toward MORE enforcement — the safe direction.
+- 2026-09-20: ⚠️ **§3.3 contradicts X10, and §3.3 is itself a lever.** §3.3 says a warning that could
+  not be displayed "is a reason **not to enforce this tick**". X10 — quoted in this milestone's own
+  traps — says the opposite: "delays *escalation*, never *enforcement*. Lock still fires." X10 wins,
+  and §3.3's wording is a standing Invariant E violation: a child who can make warnings fail (Focus,
+  killing the notifier, no console user) would otherwise defeat bedtime entirely. The ladder is
+  being built to X10.
 - 2026-09-18: Opened. Warnings and `CFUserNotification` with a masked text field are already proven
   on this hardware, including from a root daemon via the `asuser` bridge.
