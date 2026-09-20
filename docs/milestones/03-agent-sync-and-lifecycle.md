@@ -138,3 +138,15 @@ Parent UI (04) · cluster (05) · real shutdown (06).
   delivered exactly once. `agent/scripts/e2e-local.sh`.
 - 2026-09-20: **`build-pkg.sh`** — the package the supervisor installs and rolls back from, which
   did not exist and without which V-PKG-1 could not be attempted.
+- 2026-09-20: **The telemetry sampler** — ⚠️ *not in this milestone's scope, and not in any
+  other's.* Phase 3's five steps are enforcer, V-series, sync, supervisor, deadfall; nothing owned
+  the component that produces `app.usage_sample` and `session.state`, which the projector,
+  `usage_hourly`, `usage_daily` and every M4 report consume. The reports would have rendered
+  correctly with no data in them. Built here because it is agent work and the agent was open.
+  Also decodes the `telemetry` block, closing the carried-forward note that the queue caps were
+  build constants — a parent lowering `max_queue_events` changed a row in Postgres and nothing on
+  the device. Two of §4.1's suggested signal sources do not work on this hardware (no PyObjC for
+  the lock state; no `IODisplayWrangler` on Apple Silicon) and one behaves differently than assumed
+  (`ps %cpu` is a decaying average here, not Linux's lifetime one). New verifications: **V-SAMPLE-1**
+  (do `lsappinfo` and the session probe work through `launchctl asuser` from root?) and
+  **V-SAMPLE-2** (does `systemUptime` stop during sleep?). Neither can touch enforcement.

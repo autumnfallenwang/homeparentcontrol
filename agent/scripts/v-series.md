@@ -349,6 +349,70 @@ machine left on a quarantined old build will not accept the new one.
 
 ---
 
+## V-SAMPLE-1 — does the sampler work from a root daemon?
+
+⚠️ **The one sampler claim that could not be checked without root.**
+
+Two of the sampler's probes have to run inside the console user's GUI
+session, and the daemon reaches it with `launchctl asuser` — the same
+mechanism the warning banners use, which M2 verified for `osascript`.
+**Verified for `osascript`, ASSUMED for these two.** If the assumption is
+wrong the sampler reports no frontmost app and never sees a lock, which
+presents as a report page that renders perfectly with no data in it.
+
+```sh
+UID_NOW="$(stat -f %u /dev/console)"
+
+# 1. The frontmost app, from root.
+sudo launchctl asuser "$UID_NOW" /usr/bin/lsappinfo front
+sudo launchctl asuser "$UID_NOW" /usr/bin/lsappinfo info -only bundleid -only pid \
+  "$(sudo launchctl asuser "$UID_NOW" /usr/bin/lsappinfo front)"
+
+# 2. The lock state, from root, via the daemon's own re-exec.
+sudo launchctl asuser "$UID_NOW" /usr/local/libexec/hpc-sync --session-probe
+```
+
+**Pass:** the first prints `"CFBundleIdentifier"="…"` and a pid; the second
+prints `locked=0 onconsole=1`. Then lock the screen (⌃⌘Q) and re-run the
+second from another machine over SSH — it must print `locked=1`.
+
+**Fail:** empty output, or `locked=unknown`. That means `asuser` does not
+carry the session for these calls the way it does for `osascript`. The
+fallback is a LaunchAgent in the user domain feeding the daemon — which is a
+new job, a new plist and a new trust boundary, so it is an ADR rather than a
+patch.
+
+⚠️ **Neither failure touches enforcement.** The sampler is in the sync daemon
+and writes only to `queue.sqlite`. A broken sampler costs reporting, and V6
+is what proves it costs nothing else.
+
+### V-SAMPLE-2 — does the monotonic clock stop during sleep?
+
+The sampler measures intervals with `ProcessInfo.systemUptime` precisely so a
+clock step cannot inject usage, and it infers sleep from wall-clock time
+advancing further than monotonic time. **That second part assumes
+`systemUptime` does not tick while the Mac is asleep**, which is standard for
+`mach_absolute_time` but is untested on this hardware.
+
+```sh
+# Note the two clocks, sleep the Mac for five minutes, wake it, note again.
+date +%s; sysctl -n kern.boottime
+sudo pmset sleepnow
+# …wake it…
+date +%s; sysctl -n kern.boottime
+grep session.state /var/db/homeparentcontrol/spool/enforcer*.ndjson | tail -3
+```
+
+**Pass:** a `session.state` with `state: asleep` covering the gap.
+
+**Fail:** no `asleep` transition. Then the monotonic clock ran through sleep,
+and the *detector* is wrong — but the *meter* is still right, because
+`maxIntervalS` clamps any interval to 300 s regardless. Sleep would simply be
+reported as idle time rather than as sleep. Losing that distinction is a
+reporting gap, not an over-count.
+
+---
+
 ## What is already proven without you
 
 These ran in CI and locally, and need no hardware:
@@ -376,3 +440,13 @@ These ran in CI and locally, and need no hardware:
 - **The supervisor's judgement**, including that it never kickstarts the
   enforcer into a loop and never downgrades a healthy agent to the cached
   last-good — 19 tests.
+- **The sampler**, including that a clock step cannot inject usage, that an
+  interval spent idle reports zero `active_s`, and that a locked screen is
+  credited to nothing — 19 tests, plus 7 live probes against this Mac's real
+  `lsappinfo`, `ioreg` and window-server session.
+- **Swift→TypeScript interop for telemetry**: the sampler's output is
+  committed as a fixture, the Swift suite fails if the emitter drifts from
+  it, and the TypeScript suite fails if it stops satisfying the projector.
+  Falsified by renaming one field — note that `unprojectable` stayed **0**,
+  because zod's `.optional()` accepts absence. The assertion that caught it
+  was "the field is actually present and greater than zero".
