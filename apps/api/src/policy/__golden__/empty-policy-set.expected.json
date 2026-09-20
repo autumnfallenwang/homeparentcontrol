@@ -1,0 +1,46 @@
+{
+  "policy_version": 1,
+  "issued_at": "2026-09-20T18:00:00.000Z",
+  "not_before": "2026-09-20T18:00:00.000Z",
+  "device_id": "018f2a4c-7b31-7c9e-9d2a-3f5b7c1e4a60",
+  "subject": {
+    "child_id": "018f2a4b-6a20-7b8d-8c1f-2e4a6b8d0f31",
+    "display_name": "Lucy"
+  },
+  "timezone": "America/New_York",
+  "confirm_immediate_effect": false,
+  "poll": {
+    "base_interval_s": 60,
+    "boundary_interval_s": 15,
+    "boundary_lead_s": 900
+  },
+  "agent": {
+    "log_level": "info",
+    "diagnostics_retention_days": 7
+  },
+  "schedule": {
+    "kind": "windows",
+    "windows": []
+  },
+  "overrides": [],
+  "override_policy": {
+    "enabled": true,
+    "allowed_minutes": [15, 30, 60],
+    "max_minutes_per_day": 120,
+    "max_grants_per_day": 3
+  },
+  "expected_online": [],
+  "telemetry": {
+    "enabled": true,
+    "sample_interval_s": 60,
+    "flush_interval_s": 300,
+    "collect": ["session.state", "enforcement.*", "power.*", "app.usage_sample"],
+    "max_queue_events": 50000,
+    "max_queue_bytes": 33554432,
+    "max_queue_age_days": 14,
+    "audit_retention_days": 90
+  },
+  "staleness": {
+    "warn_after_s": 86400
+  }
+}

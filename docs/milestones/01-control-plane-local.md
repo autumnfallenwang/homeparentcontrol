@@ -151,6 +151,41 @@ Argo CD, Loki, alerting). The 11 cluster verifications stay blocked until k3s is
   Loki-specific code**; **C6 ❌ there is no alerting in the cluster at all** — no rules, no contact
   points, no notifiers, and the three live apps have none either. Recorded in
   [[arch-cluster-access]] and reflected in milestone 05.
+- 2026-09-20: **Phase 2 step 3 — the policy compiler shipped.** Three layers, because §9's "pure
+  function" and the milestone's "emits nothing when the content hash is unchanged" cannot both be
+  true of one function: `gather` (DB + live `date-holidays`) → `compilePolicy` (pure, 14 golden
+  files) → `publishPolicy` (hash, compare, insert or skip). **Holidays resolve in `gather`, not in
+  the compiler** — otherwise every golden file rots on a library bump or a year rollover, which is
+  the trap the spec's own purity claim walks into.
+- 2026-09-20: **The churn-killer was dead code as specified.** §5.6 compares the new hash against
+  the stored one, but §4.3's document carries `policy_version`, `issued_at` and `not_before`, all of
+  which change every compile — so the comparison could never be true and the exit criterion was not
+  merely unmet but *unmeetable*. `contentHash()` excludes exactly those three. Named `contentHash`
+  rather than `documentHash` so the distinction is visible at the call site.
+- 2026-09-20: **Five more compiler silences decided**, all recorded in code: array ordering
+  (unspecified, and without it the hash is nondeterministic); `overrides.device_id` absent from
+  §5.6's predicate, so a grant scoped to a sibling's Mac leaked into this one's document;
+  synthesised override ids must be derived, not random, or every compile churns a version;
+  `holidays_enabled` was read by nothing; and `treat_as_weekend`'s minute delta had no formula.
+- 2026-09-20: **A golden file caught a real design hole.** `treat_as_weekend` borrows the weekend
+  window's start time, which is sensible for another bedtime window and absurd for, say, 13:00–15:00
+  quiet hours — it emitted a 570-minute "extension" running hours past the rule it relaxes. Now
+  clamped to the window's own duration, where it collapses the window to nothing. That is what the
+  suite is for.
+- 2026-09-20: **The integration test caught a wire mismatch the goldens could not.** Postgres `time`
+  columns return `21:30:00`; the contract's `timeOfDay` is strictly `HH:MM`. Hand-written fixtures
+  used `HH:MM`, so only a live database exposed it. Normalised in `compile`, at the one place that
+  promises a contract-conformant document.
+- 2026-09-20: `db` now gets the `schema` generic, which is what makes step 1's `relations()` blocks
+  live — `gather` reads a device, its child, household, windows and warnings in one round trip.
+  ⚠️ **Signing deliberately deferred to step 4**; `jws`/`signing_key_id` stay null and the contract's
+  unsigned sync-envelope variant carries it. `confirm_immediate_effect` is always `false` — see below.
+- 2026-09-20: ⚠️ **Two gaps left open on purpose.** (1) **Nothing recompiles as the 21-day horizon
+  rolls**, so holidays past the enrolment date never reach a device. §9 step 5 lists a nightly job
+  and calls it only "the nightly prune"; the recompile is written down nowhere. Step 5 owns
+  schedulers — this must not be lost. (2) `confirm_immediate_effect` needs a version diff plus a
+  second, server-side DST-correct boundary resolver, neither specified nor scheduled, and the
+  agent's tick never reads the field. It lands with the `/rules` publish UI in milestone 02.
 - 2026-09-20: **Phase 2 step 2 — auth shipped.** Parent (session cookie) and agent (`x-api-key`)
   sub-apps, both mounted single-prefix; `homecal`'s auth lifted near-verbatim. **B2 ✅ closed** — and
   deliberately falsified first: turning the per-key limiter back on makes it fail at exactly

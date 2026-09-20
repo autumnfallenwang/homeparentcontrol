@@ -1,0 +1,118 @@
+{
+  "policy_version": 1,
+  "issued_at": "2026-09-20T18:00:00.000Z",
+  "not_before": "2026-09-20T18:00:00.000Z",
+  "device_id": "018f2a4c-7b31-7c9e-9d2a-3f5b7c1e4a60",
+  "subject": {
+    "child_id": "018f2a4b-6a20-7b8d-8c1f-2e4a6b8d0f31",
+    "display_name": "Lucy"
+  },
+  "timezone": "America/New_York",
+  "confirm_immediate_effect": false,
+  "poll": {
+    "base_interval_s": 60,
+    "boundary_interval_s": 15,
+    "boundary_lead_s": 900
+  },
+  "agent": {
+    "log_level": "info",
+    "diagnostics_retention_days": 7
+  },
+  "schedule": {
+    "kind": "windows",
+    "windows": [
+      {
+        "id": "018f2a4b-7c31-7d9e-9a2b-3c5d7e9f1a42",
+        "label": "School nights",
+        "days": ["mon", "tue", "wed", "thu", "sun"],
+        "restricted_from": "21:30",
+        "restricted_until": "07:00",
+        "action": "lock",
+        "action_options": {
+          "shutdown_grace_s": 300,
+          "escalate_after_failures": 3
+        },
+        "warnings": [
+          {
+            "lead_minutes": 30,
+            "channel": "banner"
+          },
+          {
+            "lead_minutes": 15,
+            "channel": "banner"
+          },
+          {
+            "lead_minutes": 5,
+            "channel": "modal"
+          },
+          {
+            "lead_minutes": 1,
+            "channel": "modal"
+          }
+        ]
+      },
+      {
+        "id": "018f2a4b-8d42-7e0f-8b3c-4d6e8f0a2b53",
+        "label": "Weekends",
+        "days": ["fri", "sat"],
+        "restricted_from": "22:30",
+        "restricted_until": "08:00",
+        "action": "lock",
+        "action_options": {
+          "shutdown_grace_s": 300,
+          "escalate_after_failures": 3
+        },
+        "warnings": [
+          {
+            "lead_minutes": 30,
+            "channel": "banner"
+          },
+          {
+            "lead_minutes": 15,
+            "channel": "banner"
+          },
+          {
+            "lead_minutes": 5,
+            "channel": "modal"
+          },
+          {
+            "lead_minutes": 1,
+            "channel": "modal"
+          }
+        ]
+      }
+    ]
+  },
+  "overrides": [],
+  "override_policy": {
+    "enabled": true,
+    "allowed_minutes": [15, 30, 60],
+    "max_minutes_per_day": 120,
+    "max_grants_per_day": 3
+  },
+  "expected_online": [
+    {
+      "days": ["mon", "tue", "wed", "thu", "fri"],
+      "from": "07:00",
+      "until": "21:45"
+    },
+    {
+      "days": ["sat", "sun"],
+      "from": "08:00",
+      "until": "22:45"
+    }
+  ],
+  "telemetry": {
+    "enabled": true,
+    "sample_interval_s": 60,
+    "flush_interval_s": 300,
+    "collect": ["session.state", "enforcement.*", "power.*", "app.usage_sample"],
+    "max_queue_events": 50000,
+    "max_queue_bytes": 33554432,
+    "max_queue_age_days": 14,
+    "audit_retention_days": 90
+  },
+  "staleness": {
+    "warn_after_s": 86400
+  }
+}

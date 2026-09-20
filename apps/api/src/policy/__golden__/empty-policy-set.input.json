@@ -1,0 +1,46 @@
+{
+  "name": "empty-policy-set",
+  "description": "a device enrolled before any window exists still compiles a valid v1",
+  "input": {
+    "now": "2026-09-20T18:00:00.000Z",
+    "device": {
+      "id": "018f2a4c-7b31-7c9e-9d2a-3f5b7c1e4a60"
+    },
+    "child": {
+      "id": "018f2a4b-6a20-7b8d-8c1f-2e4a6b8d0f31",
+      "displayName": "Lucy",
+      "timezone": null
+    },
+    "household": {
+      "id": "018f2a4a-0001-7b8c-9d0e-1f2a3b4c5d6e",
+      "timezone": "America/New_York"
+    },
+    "policySet": {
+      "id": "018f2a4b-9e53-7f10-9c4d-5e7f9a1b3c64",
+      "agentLogLevel": "info",
+      "diagnosticsRetentionDays": 7,
+      "pollBaseIntervalS": 60,
+      "pollBoundaryIntervalS": 15,
+      "pollBoundaryLeadS": 900,
+      "overrideEnabled": true,
+      "overrideAllowedMinutes": [15, 30, 60],
+      "overrideMaxMinutesPerDay": 120,
+      "overrideMaxGrantsPerDay": 3,
+      "telemetryEnabled": true,
+      "telemetrySampleIntervalS": 60,
+      "telemetryFlushIntervalS": 300,
+      "telemetryCollect": ["session.state", "enforcement.*", "power.*", "app.usage_sample"],
+      "telemetryMaxQueueEvents": 50000,
+      "telemetryMaxQueueBytes": 33554432,
+      "telemetryMaxQueueAgeDays": 14,
+      "telemetryAuditRetentionDays": 90,
+      "stalenessWarnAfterS": 86400
+    },
+    "windows": [],
+    "expectedOnline": [],
+    "exceptions": [],
+    "grants": [],
+    "holidays": [],
+    "nextVersion": 1
+  }
+}

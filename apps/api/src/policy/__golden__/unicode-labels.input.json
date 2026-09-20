@@ -1,0 +1,127 @@
+{
+  "name": "unicode-labels",
+  "description": "unicode in display_name, label and reason survives canonicalisation",
+  "input": {
+    "now": "2026-09-20T18:00:00.000Z",
+    "device": {
+      "id": "018f2a4c-7b31-7c9e-9d2a-3f5b7c1e4a60"
+    },
+    "child": {
+      "id": "018f2a4b-6a20-7b8d-8c1f-2e4a6b8d0f31",
+      "displayName": "\u9732\u897f Lucy \ud83c\udf92",
+      "timezone": null
+    },
+    "household": {
+      "id": "018f2a4a-0001-7b8c-9d0e-1f2a3b4c5d6e",
+      "timezone": "America/New_York"
+    },
+    "policySet": {
+      "id": "018f2a4b-9e53-7f10-9c4d-5e7f9a1b3c64",
+      "agentLogLevel": "info",
+      "diagnosticsRetentionDays": 7,
+      "pollBaseIntervalS": 60,
+      "pollBoundaryIntervalS": 15,
+      "pollBoundaryLeadS": 900,
+      "overrideEnabled": true,
+      "overrideAllowedMinutes": [15, 30, 60],
+      "overrideMaxMinutesPerDay": 120,
+      "overrideMaxGrantsPerDay": 3,
+      "telemetryEnabled": true,
+      "telemetrySampleIntervalS": 60,
+      "telemetryFlushIntervalS": 300,
+      "telemetryCollect": ["session.state", "enforcement.*", "power.*", "app.usage_sample"],
+      "telemetryMaxQueueEvents": 50000,
+      "telemetryMaxQueueBytes": 33554432,
+      "telemetryMaxQueueAgeDays": 14,
+      "telemetryAuditRetentionDays": 90,
+      "stalenessWarnAfterS": 86400
+    },
+    "windows": [
+      {
+        "id": "018f2a4b-7c31-7d9e-9a2b-3c5d7e9f1a42",
+        "label": "\u4e0a\u5b66\u65e5 \u2014 school nights",
+        "days": ["sun", "mon", "tue", "wed", "thu"],
+        "restrictedFrom": "21:30",
+        "restrictedUntil": "07:00",
+        "crossesMidnight": true,
+        "action": "lock",
+        "shutdownGraceS": 300,
+        "escalateAfterFailures": 3,
+        "sortOrder": 0,
+        "warnings": [
+          {
+            "leadMinutes": 30,
+            "channel": "banner"
+          },
+          {
+            "leadMinutes": 15,
+            "channel": "banner"
+          },
+          {
+            "leadMinutes": 5,
+            "channel": "modal"
+          },
+          {
+            "leadMinutes": 1,
+            "channel": "modal"
+          }
+        ]
+      },
+      {
+        "id": "018f2a4b-8d42-7e0f-8b3c-4d6e8f0a2b53",
+        "label": "Weekends",
+        "days": ["fri", "sat"],
+        "restrictedFrom": "22:30",
+        "restrictedUntil": "08:00",
+        "crossesMidnight": true,
+        "action": "lock",
+        "shutdownGraceS": 300,
+        "escalateAfterFailures": 3,
+        "sortOrder": 1,
+        "warnings": [
+          {
+            "leadMinutes": 30,
+            "channel": "banner"
+          },
+          {
+            "leadMinutes": 15,
+            "channel": "banner"
+          },
+          {
+            "leadMinutes": 5,
+            "channel": "modal"
+          },
+          {
+            "leadMinutes": 1,
+            "channel": "modal"
+          }
+        ]
+      }
+    ],
+    "expectedOnline": [
+      {
+        "days": ["mon", "tue", "wed", "thu", "fri"],
+        "fromTime": "07:00",
+        "untilTime": "21:45"
+      },
+      {
+        "days": ["sat", "sun"],
+        "fromTime": "08:00",
+        "untilTime": "22:45"
+      }
+    ],
+    "exceptions": [
+      {
+        "id": "018f2a4e-5555-7a2b-8c3d-4e5f6a7b8c9d",
+        "day": "2026-09-25",
+        "effect": "custom",
+        "extendMinutes": 30,
+        "windowId": null,
+        "note": "\u4e2d\u79cb\u7bc0 \ud83c\udf15"
+      }
+    ],
+    "grants": [],
+    "holidays": [],
+    "nextVersion": 1
+  }
+}
