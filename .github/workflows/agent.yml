@@ -1,0 +1,37 @@
+name: agent
+
+# ⚠️ PATH-FILTERED, and that is a cost decision not a style one. GitHub bills
+# macOS minutes at 10x, and this repo is overwhelmingly TypeScript — running a
+# macOS runner on every push would spend the monthly quota on a target that did
+# not change. `agent/**` covers every file that can affect the binary.
+on:
+  push:
+    branches: [main]
+    paths: ['agent/**', '.github/workflows/agent.yml']
+  pull_request:
+    paths: ['agent/**', '.github/workflows/agent.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: agent-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-verify:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: swift build --package-path agent
+
+      - run: swift test --package-path agent
+
+      # ⚠️ The exit criterion behind V1–V9: enforcement must be provably
+      # independent of the network. A binary that cannot open a socket cannot
+      # be talked out of enforcing by a server, a DNS failure or a cable.
+      #
+      # The V-series itself cannot run here — it needs a root LaunchDaemon and
+      # deliberately locks and powers off the machine. This job proves the one
+      # part of that claim a runner CAN prove.
+      - name: the enforcer cannot reach the network
+        run: ./agent/scripts/check-no-networking.sh

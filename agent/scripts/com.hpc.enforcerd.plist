@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.hpc.enforcerd</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/libexec/hpc-enforcerd</string>
+    </array>
+
+    <!-- A system daemon, not a LaunchAgent. ⚖️ A LaunchAgent runs as the child
+         and is unloadable by her; the root daemon is not. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- ⚠️ No ThrottleInterval override. The default 10 s backoff on a crash
+         loop is wanted: a crashing enforcer that respawns instantly would
+         hammer the lock path. -->
+
+    <key>StandardErrorPath</key>
+    <string>/var/log/hpc-enforcerd.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

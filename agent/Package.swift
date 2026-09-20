@@ -29,6 +29,7 @@ let package = Package(
         .testTarget(
             name: "HPCCoreTests",
             dependencies: ["HPCCore"],
+            resources: [.copy("Fixtures")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]
