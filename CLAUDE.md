@@ -67,6 +67,8 @@ When something needs recording, walk down in order:
 
 ## Docs
 
+- [`docs/PUNCHLIST.md`](docs/PUNCHLIST.md) — ⛔ **everything outstanding, in one place.** No code
+  left; it is all hardware, a router, a browser, or a decision
 - [`docs/architecture.md`](docs/architecture.md) — current system shape
 - [`docs/adr/`](docs/adr/) — append-only decision history
 - [`docs/milestones/`](docs/milestones/) — work plans + progress notes

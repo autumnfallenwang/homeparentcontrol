@@ -107,7 +107,8 @@ surviving an OS reinstall.
 - **O.2** — does the parent ever need access from outside the home? Both shapes are LAN-scoped today.
 - **O.4** — timeline.
 
-**Verifications outstanding**
+**Verifications outstanding** — the full list, grouped by what you need in hand, is
+[`PUNCHLIST.md`](./PUNCHLIST.md).
 
 - **11 cluster checks**, blocked on k3s. Highest value: does a Grafana alert actually reach the parent,
   and does the existing Alloy DaemonSet already scrape pod stdout (if so, zero Loki-specific code).
