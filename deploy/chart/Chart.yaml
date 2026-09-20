@@ -1,0 +1,10 @@
+apiVersion: v2
+name: homeparentcontrol
+description: Self-hosted parental control — api + web + Postgres
+type: application
+version: 0.1.0
+# appVersion tracks the product, not any one component. ⚠️ It is NOT the agent
+# version: the Mac agent is pinned separately through `agent.desiredVersion`
+# below, because a control-plane deploy and an agent rollout are different
+# risks and must be revertable independently (§6.6).
+appVersion: "0.1.0"

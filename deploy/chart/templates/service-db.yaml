@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hpc.fullname" (dict "context" . "component" "db") }}
+  labels:
+    {{- include "hpc.labels" (dict "context" . "component" "db") | nindent 4 }}
+spec:
+  # Headless: the StatefulSet's `serviceName` points here for stable per-pod
+  # DNS. The API reaches Postgres at `homeparentcontrol-db:5432`.
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.db.service.port }}
+      targetPort: {{ .Values.db.service.targetPort }}
+      protocol: TCP
+      name: postgres
+  selector:
+    {{- include "hpc.selectorLabels" (dict "context" . "component" "db") | nindent 4 }}

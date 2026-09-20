@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hpc.fullname" (dict "context" . "component" "web") }}
+  labels:
+    {{- include "hpc.labels" (dict "context" . "component" "web") | nindent 4 }}
+spec:
+  replicas: {{ .Values.web.replicaCount }}
+  # The web has no schedulers, so a rolling update is safe here — but it
+  # rolls in the same commit as the API (one tag bump, two parameters), and
+  # a version skew between them lasts only as long as the API's Recreate.
+  selector:
+    matchLabels:
+      {{- include "hpc.selectorLabels" (dict "context" . "component" "web") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hpc.selectorLabels" (dict "context" . "component" "web") | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: web
+          image: "{{ .Values.web.image.repository }}:{{ .Values.web.image.tag }}"
+          imagePullPolicy: {{ .Values.web.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.web.service.targetPort }}
+              protocol: TCP
+          env:
+            {{- range $k, $v := .Values.web.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.web.probes.liveness | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.web.probes.readiness | nindent 12 }}
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}

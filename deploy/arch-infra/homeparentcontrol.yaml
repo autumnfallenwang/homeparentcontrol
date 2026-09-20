@@ -1,0 +1,73 @@
+# ⚠️ **THIS FILE IS NOT APPLIED FROM THIS REPO.** It is a reviewable copy.
+#
+# The live one lives at `arch-infra/apps/homeparentcontrol.yaml`, and the
+# `root` app-of-apps recurses `arch-infra/apps/` with **automated sync and
+# prune**. Committing it there IS the deploy — there is no staging step
+# between "the file appears" and "Argo applies it". Do not put it there to
+# "get ready".
+#
+# Keeping a copy here is the `homework` convention: the deploy is reviewable
+# in the PR that causes it, rather than only in a second repo.
+#
+# ── The order matters, and steps 1 and 2 both fail SILENTLY AND GREEN ──
+#
+#   1. Create `homeparentcontrol-secrets`  → scripts/create-cluster-secret.sh
+#   2. Flip both GHCR packages to public   → there are no imagePullSecrets
+#   3. Add two router DNS entries          → *.arch.internal is NOT a wildcard
+#   4. Set ARCH_INFRA_TOKEN in this repo   → else the bump job soft-skips
+#   5. Commit THIS FILE to arch-infra      → ⚠️ this is the deploy
+#   6. Sync once BY HAND, confirm pods     → see `syncPolicy` below
+#   7. Add `automated:` in a SECOND commit
+#   8. Flip migrate.enabled to "true"
+#
+# Full runbook with verification at each step: deploy/RUNBOOK.md
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: homeparentcontrol
+  namespace: argocd
+spec:
+  project: default
+  destination:
+    namespace: homeparentcontrol
+    server: https://kubernetes.default.svc
+  source:
+    repoURL: https://github.com/autumnfallenwang/homeparentcontrol.git
+    targetRevision: main
+    path: deploy/chart
+    helm:
+      releaseName: homeparentcontrol
+      valueFiles:
+        - values.yaml
+      parameters:
+        # ⚠️ CI rewrites these two, in ONE commit, to the same SHA. The web
+        # image bakes NEXT_PUBLIC_API_URL at build time and the contract
+        # evolves in lockstep (R9), so api and web must roll together.
+        - name: api.image.tag
+          value: latest
+        - name: web.image.tag
+          value: latest
+        # ⚠️ Stays "false" until `homeparentcontrol-secrets` exists. A
+        # pre-upgrade hook that cannot read DATABASE_URL fails the entire
+        # sync before the database is created, which reads as a broken
+        # deploy rather than a missing secret.
+        - name: migrate.enabled
+          value: "false"
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    # ⚠️ **`automated` is DELIBERATELY ABSENT on the first commit.**
+    #
+    # Argo will show the diff and apply nothing. Look at it, sync once by
+    # hand, confirm the pods come up and the migrate hook is skipped, THEN
+    # add the block below in a second commit. `homework`'s CR has
+    # `automated` from the outset — correct for an app that already worked,
+    # wrong for a first deploy, because `prune: true` on a bad first render
+    # deletes whatever it thinks is surplus.
+    #
+    # Second commit adds exactly this:
+    #
+    # automated:
+    #   prune: true
+    #   selfHeal: true

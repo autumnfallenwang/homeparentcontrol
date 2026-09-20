@@ -1,0 +1,225 @@
+# Grafana unified-alerting rules, provisioned as code.
+#
+# ⚠️ Read deploy/observability/README.md first. Every selector here is
+# `{namespace="homeparentcontrol"}` because the labels §7.5's examples use do
+# not exist in this cluster, and a rule that matches nothing fires a
+# synthetic No-Data alert that bypasses the notification policy.
+#
+# ⚠️ **Five rules. That is the upper limit for a one-agent home system, and
+# it is a limit rather than a starting point.** Every alert that fires and
+# needs no action trains the parent to ignore the next one.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: homeparentcontrol
+    folder: homeparentcontrol
+    # One minute: the liveness job evaluates every 60 s, so a shorter
+    # interval re-reads the same line and a longer one adds latency to a
+    # signal that is already a minute coarse.
+    interval: 1m
+    rules:
+      # ── A1. The agent went quiet unexpectedly.
+      - uid: hpc-a1-unexpected-silence
+        title: Agent unexpectedly silent
+        condition: threshold
+        for: 5m
+        labels:
+          severity: critical
+          app: homeparentcontrol
+        annotations:
+          summary: "{{ $labels.device_id }} stopped checking in"
+          # ⚠️ The wording matters as much here as in the UI. §4.6: the
+          # natural reading of "offline" is "the rules stopped", which is
+          # the opposite of the truth.
+          description: >-
+            The Mac has not checked in for several minutes. It is STILL
+            ENFORCING the rules it already has — a cached policy never
+            expires. What is lost is new rules and new grants reaching it.
+        data:
+          - refId: query
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: loki
+            model:
+              datasource: { type: loki, uid: loki }
+              # `or vector(0)` on the AGGREGATED expression forces a numeric
+              # result when nothing matches. Applied to the inner range
+              # vector instead it would not.
+              expr: >-
+                sum(count_over_time({namespace="homeparentcontrol", container="api"}
+                | json | event="agent_status" | state="UNEXPECTED_SILENCE" [5m])) or vector(0)
+              queryType: instant
+              refId: query
+          - refId: threshold
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: query
+              refId: threshold
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        # Every rule except A5 treats No Data as OK: the control plane's
+        # stream is always alive, so genuine No Data here means Loki or
+        # Grafana is broken — which is A5's job to say, once, rather than
+        # each rule saying it separately.
+        noDataState: OK
+        execErrState: Error
+
+      # ── A2. Quiet long enough that it is not a reboot.
+      - uid: hpc-a2-silent-too-long
+        title: Agent silent too long
+        condition: threshold
+        for: 10m
+        labels:
+          severity: warning
+          app: homeparentcontrol
+        annotations:
+          summary: "{{ $labels.device_id }} has been silent for over a day"
+          description: >-
+            Still enforcing its cached rules, but it has not been reachable
+            for a long time. If the Mac is away on purpose, set "Away until…"
+            on its device page rather than silencing this.
+        data:
+          - refId: query
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: loki
+            model:
+              datasource: { type: loki, uid: loki }
+              expr: >-
+                sum(count_over_time({namespace="homeparentcontrol", container="api"}
+                | json | event="agent_status" | state="SILENT_TOO_LONG" [10m])) or vector(0)
+              queryType: instant
+              refId: query
+          - refId: threshold
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: query
+              refId: threshold
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+
+      # ── A3. Ticking, but cannot determine the rules.
+      - uid: hpc-a3-degraded
+        title: Agent degraded — not enforcing
+        condition: threshold
+        for: 3m
+        labels:
+          severity: warning
+          app: homeparentcontrol
+        annotations:
+          # ⚠️ The ONE state where "still enforcing" would be a lie. §4.6's
+          # fail-open branch is only defensible while it is loud, and this
+          # is the loud part.
+          summary: "{{ $labels.device_id }} is NOT enforcing"
+          description: >-
+            The agent is running and reachable but cannot read its rules, so
+            it is failing open. Bedtime will not happen until this is fixed.
+        data:
+          - refId: query
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: loki
+            model:
+              datasource: { type: loki, uid: loki }
+              expr: >-
+                sum(count_over_time({namespace="homeparentcontrol", container="api"}
+                | json | event="agent_status" | state="DEGRADED" [3m])) or vector(0)
+              queryType: instant
+              refId: query
+          - refId: threshold
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: query
+              refId: threshold
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+
+      # ── A4. Crash loop.
+      #
+      # ⚠️ Rewritten. §7.5 reads this off the AGENT's log stream, and the
+      # agent is a Mac daemon whose logs never reach Loki. The control
+      # plane's own view of the same fact is how many `agent.started` events
+      # it ingested, counted on the `agent.events` line.
+      - uid: hpc-a4-crash-loop
+        title: Agent restarting repeatedly
+        condition: threshold
+        for: 0m
+        labels:
+          severity: critical
+          app: homeparentcontrol
+        annotations:
+          summary: "The agent has restarted more than 3 times in 10 minutes"
+          description: >-
+            Repeated restarts mean the supervisor is probably rolling back,
+            or launchd is respawning a crashing enforcer. Enforcement still
+            happens between crashes, but check the device page.
+        data:
+          - refId: query
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: loki
+            model:
+              datasource: { type: loki, uid: loki }
+              expr: >-
+                sum(sum_over_time({namespace="homeparentcontrol", container="api"}
+                | json | event="agent.events" | unwrap agent_started [10m])) or vector(0)
+              queryType: instant
+              refId: query
+          - refId: threshold
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: query
+              refId: threshold
+              conditions:
+                - evaluator: { type: gt, params: [3] }
+        noDataState: OK
+        execErrState: Error
+
+      # ── A5. The watcher of the watchman.
+      - uid: hpc-a5-liveness-stopped
+        title: Health monitoring itself has stopped
+        condition: threshold
+        for: 10m
+        labels:
+          severity: critical
+          app: homeparentcontrol
+        annotations:
+          summary: "No health evaluations in 10 minutes — monitoring is blind"
+          description: >-
+            The liveness job emits a line per device per minute. Silence here
+            means the API is down, the scheduler is wedged, or Loki stopped
+            ingesting. Every other alert in this folder is unreliable until
+            this clears.
+        data:
+          - refId: query
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: loki
+            model:
+              datasource: { type: loki, uid: loki }
+              expr: >-
+                sum(count_over_time({namespace="homeparentcontrol", container="api"}
+                | json | event="agent_status" [10m])) or vector(0)
+              queryType: instant
+              refId: query
+          - refId: threshold
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: query
+              refId: threshold
+              conditions:
+                - evaluator: { type: lt, params: [5] }
+        # ★ The ONLY rule that alerts on No Data, and it has to.
+        #
+        # Every other rule here asks "did something bad appear?" — absence is
+        # good news. This one asks "is the monitoring alive?", where absence
+        # IS the bad news. ⚠️ Grafana's No-Data alert is synthetic and may not
+        # inherit the notification policy, which is precisely why only one
+        # rule is allowed to depend on it, and why the `or vector(0)` above
+        # is still there as the first line of defence.
+        noDataState: Alerting
+        execErrState: Alerting

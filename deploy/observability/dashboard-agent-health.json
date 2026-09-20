@@ -1,0 +1,217 @@
+{
+  "uid": "hpc-agent-health",
+  "title": "homeparentcontrol \u2014 agent health",
+  "description": "Is the system working? Deliberately contains NOTHING about the child's usage \u2014 that is product data and belongs in the parent UI.",
+  "tags": [
+    "homeparentcontrol"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Agent status",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "HEALTHY",
+                  "color": "green",
+                  "index": 0
+                },
+                "2": {
+                  "text": "EXPECTED OFFLINE",
+                  "color": "blue",
+                  "index": 1
+                },
+                "3": {
+                  "text": "SILENT",
+                  "color": "orange",
+                  "index": 2
+                },
+                "4": {
+                  "text": "NOT ENFORCING",
+                  "color": "red",
+                  "index": 3
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "max((sum(count_over_time({namespace=\"homeparentcontrol\", container=\"api\"} | json | event=\"agent_status\" | state=\"DEGRADED\" [5m])) or vector(0)) * 4 or (sum(count_over_time({namespace=\"homeparentcontrol\", container=\"api\"} | json | event=\"agent_status\" | state=~\"UNEXPECTED_SILENCE|SILENT_TOO_LONG\" [5m])) or vector(0)) * 3 or (sum(count_over_time({namespace=\"homeparentcontrol\", container=\"api\"} | json | event=\"agent_status\" | state=\"EXPECTED_OFFLINE\" [5m])) or vector(0)) * 2 or (sum(count_over_time({namespace=\"homeparentcontrol\", container=\"api\"} | json | event=\"agent_status\" | state=\"HEALTHY\" [5m])) or vector(0)))",
+          "refId": "A",
+          "queryType": "instant"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Health evaluations (last 10m)",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "description": "The liveness job emits one line per device per minute. Zero here means monitoring is blind, which is what A5 alerts on.",
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({namespace=\"homeparentcontrol\", container=\"api\"} | json | event=\"agent_status\" [10m])) or vector(0)",
+          "refId": "A",
+          "queryType": "instant"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "logs",
+      "title": "Agent version and boot",
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{namespace=\"homeparentcontrol\", container=\"api\"} | json | event=\"agent.sync\" | line_format \"{{.device_id}} v{{.agent_version}} tick={{.tick_seq}} cadence={{.cadence}}\"",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "state-timeline",
+      "title": "\u2b50 Online / offline, 7 days",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "description": "The shape of normal. An anomaly shows up here without anyone defining what anomalous means.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 0
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (state) (count_over_time({namespace=\"homeparentcontrol\", container=\"api\"} | json | event=\"agent_status\" | label_format state=state [$__auto]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "logs",
+      "title": "Warnings and errors",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{namespace=\"homeparentcontrol\"} | json | level >= 40",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "logs",
+      "title": "Enforcement events",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "description": "What actually happened on the Mac, as the control plane saw it arrive.",
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{namespace=\"homeparentcontrol\", container=\"api\"} | json | event=~\"agent_status_notify|agent_status_reclassified|policy.published|override.granted|device.revoke|device.decommission\"",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

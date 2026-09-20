@@ -1,0 +1,28 @@
+{{- if .Values.web.ingress.enabled -}}
+# ⚠️ **X4 — plain HTTP, accepted.** There is no `tls:` block and no
+# cert-manager in this cluster; every host is `http://<name>.arch.internal`
+# on Traefik. §5.9 records this as a deliberate decision under AR.2, not an
+# oversight. The consequence that matters: the agent's device credential
+# travels in clear on the LAN, which is why scope (one key, three
+# permissions, one device) is the actual security control rather than the
+# transport.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "hpc.fullname" (dict "context" . "component" "web") }}
+  labels:
+    {{- include "hpc.labels" (dict "context" . "component" "web") | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.web.ingress.className }}
+  rules:
+    - host: {{ .Values.web.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "hpc.fullname" (dict "context" . "component" "web") }}
+                port:
+                  name: http
+{{- end }}

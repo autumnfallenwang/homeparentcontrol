@@ -49,13 +49,127 @@ jobs:
           pnpm --filter @hpc/contract emit
           git diff --exit-code -- packages/contract/contract.schema.json
 
-# 🛑 DELIBERATELY NO DEPLOY JOBS.
-#
-# `build-and-deploy` and `bump-arch-infra` land in phase 5, not before. Adding
-# them earlier would ship an unfinished app to the cluster on the next merge to
-# main -- the GitOps chain has no staging step, and the `root` app-of-apps syncs
-# automatically with prune enabled.
-#
-# This absence is one of four independent blocks on deployment; the others are
-# the missing Application CR in arch-infra, the missing GHCR packages, and the
-# unset ARCH_INFRA_TOKEN. See docs/milestones/05-cluster-deployment.md.
+  build-and-deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        component: [api, web]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.component }} image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/Dockerfile.${{ matrix.component }}
+          push: true
+          tags: |
+            ghcr.io/autumnfallenwang/homeparentcontrol-${{ matrix.component }}:latest
+            ghcr.io/autumnfallenwang/homeparentcontrol-${{ matrix.component }}:${{ github.sha }}
+          # ⚠️ Only the WEB image takes a build arg. Next inlines NEXT_PUBLIC_*
+          # at build time, so the browser-side API origin is baked into the
+          # client bundle and the chart cannot change it afterwards. The chart
+          # sets API_URL separately, at runtime, for server-side fetches.
+          #
+          # This is also why api and web must roll on ONE SHA: a web bundle
+          # built against an older contract would be talking to a newer API.
+          build-args: |
+            ${{ matrix.component == 'web' && 'NEXT_PUBLIC_API_URL=http://homeparentcontrol-api.arch.internal' || '' }}
+          # Separate cache scopes — api and web have unrelated dep trees.
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+  bump-arch-infra:
+    needs: build-and-deploy
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Bump api+web image tags in arch-infra
+        env:
+          GH_TOKEN: ${{ secrets.ARCH_INFRA_TOKEN }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # ★ B3 / A.22 — THIS JOB FAILS HARD, and that is the whole point.
+          #
+          # The house template `exit 0`s on both conditions below. That is the
+          # trap this milestone is shaped around: with no PAT, or no
+          # Application CR, the images build, GHCR fills up, every check goes
+          # green — and nothing reaches the cluster. An unwired GitOps chain
+          # becomes indistinguishable from a working one.
+          #
+          # The cost of failing hard is a red build on a repo that is not
+          # wired up yet. The cost of the soft skip is believing you deployed.
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::ARCH_INFRA_TOKEN is not set on this repository."
+            echo "Images were built and pushed, but the GitOps chain is NOT wired:"
+            echo "nothing will reach the cluster. See deploy/RUNBOOK.md step 4."
+            exit 1
+          fi
+
+          CLONE_URL="https://x-access-token:${GH_TOKEN}@github.com/autumnfallenwang/arch-infra.git"
+          REPO=/tmp/arch-infra
+          git clone --depth 1 "$CLONE_URL" "$REPO"
+          cd "$REPO"
+
+          if [ ! -f apps/homeparentcontrol.yaml ]; then
+            echo "::error::apps/homeparentcontrol.yaml does not exist in arch-infra."
+            echo "This job only REWRITES tags in an existing file; it cannot create one."
+            echo "Argo does not know this app exists. See deploy/RUNBOOK.md step 5."
+            exit 1
+          fi
+
+          # ⚠️ One yq write, both tags, so api and web roll on the same SHA.
+          # yq v4 is preinstalled on the runner.
+          yq -i '
+            (.spec.source.helm.parameters[] | select(.name == "api.image.tag") | .value) = strenv(SHA) |
+            (.spec.source.helm.parameters[] | select(.name == "web.image.tag") | .value) = strenv(SHA)
+          ' apps/homeparentcontrol.yaml
+
+          # ⚠️ Verify the write LANDED. `yq` exits 0 when its `select` matches
+          # nothing, so a renamed parameter leaves the file untouched, commits
+          # nothing, and reports "no change" — the soft skip again, one layer
+          # down.
+          for param in api.image.tag web.image.tag; do
+            actual="$(yq -r ".spec.source.helm.parameters[] | select(.name == \"$param\") | .value" apps/homeparentcontrol.yaml)"
+            if [ "$actual" != "$SHA" ]; then
+              echo "::error::$param is '$actual', expected '$SHA' — parameter missing or renamed."
+              exit 1
+            fi
+          done
+
+          git config user.email "actions@github.com"
+          git config user.name  "GitHub Actions"
+
+          if git diff --quiet apps/homeparentcontrol.yaml; then
+            echo "No change — arch-infra already at $SHA."
+            exit 0
+          fi
+
+          git add apps/homeparentcontrol.yaml
+          git commit -m "homeparentcontrol: bump api+web images to $SHA"
+          # ⚠️ Every main build of ANY of the four apps pushes here, so losing
+          # a race is normal rather than exceptional. Rebase and retry instead
+          # of failing a deploy because of someone else's commit.
+          for attempt in 1 2 3; do
+            if git push; then exit 0; fi
+            echo "push rejected (attempt $attempt) — rebasing onto origin/main"
+            git pull --rebase origin main
+          done
+          echo "::error::could not push to arch-infra after 3 attempts"
+          exit 1

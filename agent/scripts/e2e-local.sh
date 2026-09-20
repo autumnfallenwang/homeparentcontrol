@@ -40,6 +40,7 @@ API_PID=$!
 # ⚠️ Kill the whole group. `tsx` spawns a child, and killing only the wrapper
 # leaves the listener holding the port — so the NEXT run fails to bind and
 # silently tests the previous build.
+# shellcheck disable=SC2329  # invoked by the `trap` below, not by name.
 cleanup() { kill -- "-$API_PID" 2>/dev/null || kill "$API_PID" 2>/dev/null || true; }
 trap cleanup EXIT
 

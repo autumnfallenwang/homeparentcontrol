@@ -1,0 +1,47 @@
+{{- if .Values.migrate.enabled -}}
+# drizzle-kit migrate, against the SQL baked into the api image
+# (apps/api/drizzle/*.sql).
+#
+# ⚠️ Disabled by default and enabled via the Argo CD parameter only AFTER
+# `homeparentcontrol-secrets` exists. A hook that cannot read DATABASE_URL
+# fails the whole sync before the database is even created, which reads as
+# "the deploy is broken" rather than "the secret is missing".
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "hpc.fullname" (dict "context" . "component" "migrate") }}
+  labels:
+    {{- include "hpc.labels" (dict "context" . "component" "migrate") | nindent 4 }}
+  annotations:
+    # hook-weight -5 sequences this before the non-hook resources, so the
+    # schema is ready by the time the API pod's readiness probe runs.
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "hpc.selectorLabels" (dict "context" . "component" "migrate") | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command: ["pnpm", "--filter", "@hpc/api", "exec", "drizzle-kit", "migrate"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.name }}
+                  key: DATABASE_URL
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}
+{{- end }}

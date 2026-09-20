@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "hpc.fullname" (dict "context" . "component" "db") }}
+  labels:
+    {{- include "hpc.labels" (dict "context" . "component" "db") | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "hpc.fullname" (dict "context" . "component" "db") }}
+  selector:
+    matchLabels:
+      {{- include "hpc.selectorLabels" (dict "context" . "component" "db") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hpc.selectorLabels" (dict "context" . "component" "db") | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.db.podSecurityContext | nindent 8 }}
+      containers:
+        - name: postgres
+          image: "{{ .Values.db.image.repository }}:{{ .Values.db.image.tag }}"
+          imagePullPolicy: {{ .Values.db.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.db.env.POSTGRES_DB | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.db.env.POSTGRES_USER | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.name }}
+                  key: POSTGRES_PASSWORD
+            # ⚠️ PGDATA is a SUBDIRECTORY of the mount. initdb refuses to
+            # seed a non-empty directory, and local-path-provisioner can
+            # leave a `lost+found` at the mount root depending on the
+            # filesystem — which would make the very first boot fail.
+            - name: PGDATA
+              value: {{ printf "%s/pgdata" .Values.db.persistence.mountPath | quote }}
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.db.env.POSTGRES_USER | quote }}
+                - -d
+                - {{ .Values.db.env.POSTGRES_DB | quote }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.db.env.POSTGRES_USER | quote }}
+                - -d
+                - {{ .Values.db.env.POSTGRES_DB | quote }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.db.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.db.persistence.mountPath }}
+  # ⚠️ Expect `OutOfSync but Healthy` on this StatefulSet for ever, and do
+  # not chase it. All three sibling apps show the same drift —
+  # `volumeClaimTemplates` plus ServerSideApply defaults — and sync still
+  # reports "Succeeded". Chasing it wastes an afternoon.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.db.persistence.storageClass }}
+        resources:
+          requests:
+            storage: {{ .Values.db.persistence.size }}

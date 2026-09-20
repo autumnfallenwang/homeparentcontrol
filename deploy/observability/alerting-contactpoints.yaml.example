@@ -1,0 +1,53 @@
+# ⚠️ **A CHOICE, NOT A DEFAULT. Nothing here is wired up.**
+#
+# Verified 2026-09-20: this cluster has no contact point, no notification
+# policy, no SMTP configuration and no notification service of any kind —
+# not for this app, and not for `homework`, `homecal` or `homenews` either.
+#
+# C6 says "a test alert demonstrably reaches the parent", and until that is
+# observed *the entire observability design is decoration*. Provisioning the
+# rules makes alerts FIRE. Only this file makes them ARRIVE, and which option
+# to take is D.2 — an owner decision that is still open.
+#
+# Pick ONE, fill it in, and then actually cause an alert and watch it land.
+# An alert nobody receives is worse than no alert, because it is trusted.
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: parent
+    receivers:
+      # ── Option A: ntfy. No account, no SMTP relay, self-hostable in one
+      # container, and the phone app is free. The topic name IS the secret,
+      # so pick something unguessable.
+      - uid: parent-ntfy
+        type: webhook
+        settings:
+          url: https://ntfy.sh/CHANGEME-pick-something-unguessable
+          httpMethod: POST
+          # ⚠️ Keep the title short and the body honest. §4.6's rule applies
+          # to a phone notification as much as to the UI: "offline" reads as
+          # "the rules stopped", which is the opposite of the truth.
+          title: '{{ .CommonAnnotations.summary }}'
+          message: '{{ .CommonAnnotations.description }}'
+
+      # ── Option B: email. Needs `[smtp]` in grafana.ini and a relay that
+      # will accept mail from this network — neither exists today, which is
+      # why this is second.
+      # - uid: parent-email
+      #   type: email
+      #   settings:
+      #     addresses: parent@example.com
+      #     singleEmail: true
+
+policies:
+  - orgId: 1
+    receiver: parent
+    # ⚠️ Group by the device, not by alertname. Three rules firing about the
+    # same Mac are one situation; the same rule firing about two Macs is two.
+    group_by: [device_id]
+    group_wait: 30s
+    group_interval: 5m
+    # ⚠️ Four hours, not four minutes. A critical alert that re-sends every
+    # five minutes through the night is one the parent silences permanently,
+    # and a permanently silenced alert is the failure C6 exists to prevent.
+    repeat_interval: 4h

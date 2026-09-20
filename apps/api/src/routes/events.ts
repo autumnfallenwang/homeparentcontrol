@@ -106,6 +106,13 @@ export async function handleEvents(c: Context): Promise<Response> {
   const rows: (typeof events.$inferInsert)[] = [];
   let unknownEventType = 0;
   let badEventIdFormat = 0;
+  // ⚠️ §7.5's A4 alert ("crash loop") is specified against the AGENT's log
+  // stream — and the agent is a daemon on a Mac whose logs never reach Loki.
+  // Nothing ships them and nothing should: that would be a second telemetry
+  // path competing with `/events`. The control plane's own view of the same
+  // fact is how many `agent.started` events it ingested, so it is counted
+  // here, on the line Alloy already collects, exactly as the other two are.
+  let agentStarted = 0;
 
   for (const raw of batch.events) {
     const parsed = eventEnvelope.safeParse(raw);
@@ -124,6 +131,7 @@ export async function handleEvents(c: Context): Promise<Response> {
     // R8 — counted, never rejected. "Adding per-app reporting later is a
     // backfill, not a migration."
     if (!isKnownType(event.type)) unknownEventType++;
+    if (event.type === "agent.started") agentStarted++;
     accepted.push(event.event_id);
     rows.push({
       householdId,
@@ -170,6 +178,7 @@ export async function handleEvents(c: Context): Promise<Response> {
       // in this cluster (C2), so they live on the log line Alloy already ships.
       unknown_event_type: unknownEventType,
       bad_event_id_format: badEventIdFormat,
+      agent_started: agentStarted,
     },
     "events ingested",
   );

@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hpc.fullname" (dict "context" . "component" "api") }}
+  labels:
+    {{- include "hpc.labels" (dict "context" . "component" "api") | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  # ⚠️ Recreate, not RollingUpdate, and this is load-bearing.
+  #
+  # §5.8: three in-process schedulers (liveness 60 s, projection 5 min,
+  # nightly) are singletons, and "`replicaCount: 1` + `strategy: Recreate`
+  # guarantees no overlap". A rolling cutover runs two API pods for a few
+  # seconds, which means two liveness evaluators writing
+  # `agent_status_intervals` and two projectors recomputing the same bucket.
+  # If replicas ever exceed 1, the liveness job needs `pg_try_advisory_lock`
+  # before this can become RollingUpdate.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "hpc.selectorLabels" (dict "context" . "component" "api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hpc.selectorLabels" (dict "context" . "component" "api") | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: api
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.service.targetPort }}
+              protocol: TCP
+          env:
+            {{- range $k, $v := .Values.api.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- if .Values.agent.desiredVersion }}
+            # §6.6 — the pinned agent version reaches a device as a
+            # `desired[]` item on its next tick. ⚠️ The digest travels with
+            # it and is the ONLY gate on what gets installed.
+            - name: AGENT_DESIRED_VERSION
+              value: {{ .Values.agent.desiredVersion | quote }}
+            - name: AGENT_PKG_URL
+              value: {{ .Values.agent.pkgUrl | quote }}
+            - name: AGENT_PKG_SHA256
+              value: {{ .Values.agent.pkgSha256 | quote }}
+            {{- end }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.name }}
+                  key: DATABASE_URL
+            - name: BETTER_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.name }}
+                  key: BETTER_AUTH_SECRET
+            # ⚠️ The Ed25519 private key every agent verifies its cached
+            # policy against. Without it the API refuses to start unless
+            # ALLOW_UNSIGNED_POLICY is set — see `assertSigningConfigured`.
+            # There is no rotation channel: replacing this key makes every
+            # enrolled device reject every policy and fall back to LKG for
+            # ever, so it is generated once and kept.
+            - name: POLICY_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.name }}
+                  key: POLICY_SIGNING_KEY
+            - name: BETTER_AUTH_URL
+              value: "http://{{ .Values.api.ingress.host }}"
+          livenessProbe:
+            {{- toYaml .Values.api.probes.liveness | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.api.probes.readiness | nindent 12 }}
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}

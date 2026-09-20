@@ -1,0 +1,192 @@
+# Default values for the homeparentcontrol chart.
+# Override via `helm install --set` or the Argo CD Application's
+# spec.source.helm.parameters in arch-infra/apps/homeparentcontrol.yaml.
+#
+# Shape: three workloads (api, web, db) + a pre-upgrade migrate Job, one
+# release. Follows the `homework` chart, which is the newest generation of the
+# house template; deltas from it are commented where they exist.
+
+# Real secrets live in this Secret, created out of band BEFORE the first sync:
+#   bash deploy/scripts/create-cluster-secret.sh
+#
+# ⚠️ Three keys, one more than homework: DATABASE_URL, POSTGRES_PASSWORD,
+# BETTER_AUTH_SECRET and POLICY_SIGNING_KEY. The last is the Ed25519 private
+# key every agent's cached policy is verified against — see §5.8.
+secrets:
+  name: homeparentcontrol-secrets
+
+api:
+  image:
+    repository: ghcr.io/autumnfallenwang/homeparentcontrol-api
+    # CI bumps `tag` to a commit SHA in the Argo CD Application's parameters.
+    # web bumps in the SAME commit so the two roll together: the web build
+    # bakes NEXT_PUBLIC_API_URL at build time and the contract evolves in
+    # lockstep (R9).
+    tag: latest
+    pullPolicy: IfNotPresent
+  # ⚠️ Do not scale. Three in-process schedulers (liveness 60 s, projection
+  # 5 min, nightly) are singletons; §5.8 notes that `replicaCount: 1` plus
+  # `strategy: Recreate` is what guarantees no overlap. Two replicas would
+  # double-run the projector and double-notify.
+  replicaCount: 1
+  service:
+    port: 80
+    targetPort: 52001
+  ingress:
+    enabled: true
+    className: traefik
+    # ⚠️ Needs a router DNS entry. `*.arch.internal` is NOT a wildcard —
+    # every one of the ten live hosts has its own 1:1 entry, and an
+    # unregistered name returns NXDOMAIN while Argo still reports Healthy.
+    host: homeparentcontrol-api.arch.internal
+  env:
+    API_PORT: "52001"
+    CORS_ORIGINS: http://homeparentcontrol.arch.internal
+    LOG_LEVEL: info
+    # ⚠️ The pod's clock is NOT what bedtime uses — A.30 says the policy's
+    # timezone wins, and the agent resolves boundaries in it. This is here so
+    # server-side log timestamps and the nightly job's "today" read sensibly
+    # to a human in this house.
+    TZ: America/New_York
+    # §5.7's retention ladder. ⚠️ RAW_SAMPLE_RETENTION_DAYS must exceed the
+    # agent's max_queue_age_days (14) or a long outage delivers events that
+    # are pruned before the projector sees them. `assertRetentionInvariant`
+    # refuses to boot if this is violated.
+    RAW_SAMPLE_RETENTION_DAYS: "90"
+    RAW_AUDIT_RETENTION_DAYS: "400"
+    USAGE_HOURLY_RETENTION_DAYS: "400"
+    AGENT_STATUS_RETENTION_DAYS: "400"
+    AGENT_MAX_QUEUE_AGE_DAYS: "14"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  probes:
+    liveness:
+      httpGet:
+        path: /health
+        port: 52001
+      initialDelaySeconds: 10
+      periodSeconds: 30
+    readiness:
+      httpGet:
+        path: /health
+        port: 52001
+      initialDelaySeconds: 3
+      periodSeconds: 10
+
+web:
+  image:
+    repository: ghcr.io/autumnfallenwang/homeparentcontrol-web
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    port: 80
+    targetPort: 52000
+  ingress:
+    enabled: true
+    className: traefik
+    host: homeparentcontrol.arch.internal
+  env:
+    PORT: "52000"
+    HOSTNAME: "0.0.0.0"
+    # Server-side fetches go to the in-cluster Service, so SSR never leaves
+    # the pod network. The BROWSER uses NEXT_PUBLIC_API_URL, baked at build
+    # time by the Dockerfile build arg.
+    API_URL: http://homeparentcontrol-api
+    LOG_LEVEL: info
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  probes:
+    liveness:
+      httpGet:
+        path: /
+        port: 52000
+      initialDelaySeconds: 10
+      periodSeconds: 30
+    readiness:
+      httpGet:
+        path: /
+        port: 52000
+      initialDelaySeconds: 3
+      periodSeconds: 10
+
+db:
+  image:
+    repository: postgres
+    tag: 17-alpine
+    pullPolicy: IfNotPresent
+  service:
+    port: 5432
+    targetPort: 5432
+  persistence:
+    # ⚠️ 5Gi, unchanged from the template, and §5.7 says explicitly: "The
+    # house chart's existing db.persistence.size: 5Gi on local-path is
+    # already right. Do not change it." Steady state is ~79 MB after a year.
+    size: 5Gi
+    storageClass: local-path
+    mountPath: /var/lib/postgresql/data
+  env:
+    POSTGRES_DB: homeparentcontrol
+    POSTGRES_USER: hpc
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    runAsGroup: 999
+    fsGroup: 999
+
+# Migrate Job — a Helm pre-install/pre-upgrade hook running drizzle-kit
+# against the SQL baked into the api image.
+#
+# ⚠️ Disabled by default, and the Application CR must leave it that way until
+# `homeparentcontrol-secrets` exists. A migrate hook that cannot read
+# DATABASE_URL fails the whole sync before anything else runs.
+migrate:
+  enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+# ⚠️ **The agent's pinned version, and it is NOT `appVersion`.**
+#
+# §6.6: the control plane publishes a desired agent version plus the pkg URL
+# and its SHA-256; the sync daemon stages it, and the supervisor verifies the
+# digest again before `installer` runs. `installer -pkg` as root bypasses
+# Gatekeeper and there is no Developer ID certificate (D.7), so **the pinned
+# digest is the whole gate**.
+#
+# Empty means "publish no desired version" — the agent keeps what it has,
+# which is the right default for a control plane that has just been deployed.
+agent:
+  desiredVersion: ""
+  pkgUrl: ""
+  pkgSha256: ""
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL

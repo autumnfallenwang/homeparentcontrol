@@ -37,3 +37,6 @@ coverage/
 # SwiftPM
 agent/.build/
 agent/.swiftpm/
+
+# Real cluster secrets — never committed. See deploy/cluster-secrets.env.example
+cluster-secrets.env
