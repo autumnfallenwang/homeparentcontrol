@@ -120,5 +120,12 @@ surviving an OS reinstall.
   are now scripted end to end in `agent/scripts/v-series.md`; every one needs a Mac you are willing to
   have locked. **V6 is the headline** — byte-identical enforcer logs with and without the sync daemon
   running — and it is the only direct check of the claim everything else assumes.
+- **V-SHADOW-1** — shadow mode's 20 lines of enforcer wiring. Its pure logic has 29 tests, but the
+  branch that decides whether a Mac locks tonight needs root. ⚠️ Its second half — *does it start
+  enforcing again?* — matters more than its first.
+- **V-SAMPLE-1 / V-SAMPLE-2** — do `lsappinfo` and the session probe survive `launchctl asuser`
+  from root, and does `systemUptime` stop during sleep? Neither can affect enforcement.
+- **The cutover itself** — [`agent/scripts/cutover.md`](../agent/scripts/cutover.md), including
+  **the one thing development never exercised: a real scheduled power-off**.
 - **macOS 27** shipped 2026-09-14 and is entirely untested. ⚠️ Three confident claims about macOS 26 were
   refuted by direct testing during research, so treat version-fragile conclusions as hypotheses.

@@ -1,6 +1,6 @@
 ---
 name: 05-cluster-deployment
-status: open
+status: awaiting-verification
 opened: 2026-09-18
 ---
 
@@ -211,3 +211,6 @@ Real shutdown on the Mac mini (06) · O.2 remote access, unless the owner decide
 The cluster Secret (step 1) is scripted and its generator is verified end to
 end — the key it produces loads through the API's own `loadSigningKey` — but
 it writes a real credential to a live cluster, so it is the owner's to run.
+- 2026-09-20: **`awaiting-verification`.** No code left. Two router DNS entries, one GitHub
+  secret, one commit to `arch-infra` (⚠️ which IS the deploy), and C6's channel — a decision,
+  not a task.

@@ -44,6 +44,10 @@ This project uses **milestone-driven** development:
     one-file rule meaningless and hid which milestone was actually being worked on. A milestone is
     `awaiting-verification` when its code is complete and its remaining exit criteria are *observations*
     a person has to make — and the file must say exactly which, with a procedure.
+  - ⚠️ **Zero files `open` is a legitimate terminal state**, and as of 2026-09-20 it is the real
+    one: every milestone's code is written and everything outstanding needs hardware, a browser,
+    a router, or an owner decision. Do not open a milestone to avoid an empty set — that would
+    invent work to satisfy a status field.
 - **Plan before code.** `/devkit-task`'s Phase 3 plan-approval gate is non-negotiable, even for one-line fixes. The plan loop catches misunderstandings before they cost real time.
 - **Verify before claiming done.** `/devkit-task` runs lint → typecheck → test before reporting success. Retry up to 3x on failure, then surface.
 - **Architecture changes need an ADR.** If a significant decision was made (lib choice, boundary move, approach pivot), write a new `docs/adr/NNNN-*.md` from `docs/adr/0000-template.md`.
