@@ -9,16 +9,23 @@ import Foundation
 /// Nothing here resists an admin child. The tell is that any attempt to
 /// interfere at all lands in `tripwires`, and the parent finds out tonight
 /// rather than in March.
-enum KillSwitch {
+public enum KillSwitch {
 
-    struct Status {
-        let present: Bool
+    public struct Status {
+        public let present: Bool
         /// Nil when the file is empty — accepted, but logged as `indefinite`,
         /// because "one film night" must not silently become "permanently off".
-        let until: Date?
-        let indefinite: Bool
+        public let until: Date?
+        public let indefinite: Bool
         /// True when the check itself failed. See `check()`.
-        let checkThrew: Bool
+        public let checkThrew: Bool
+
+        public init(present: Bool, until: Date?, indefinite: Bool, checkThrew: Bool) {
+            self.present = present
+            self.until = until
+            self.indefinite = indefinite
+            self.checkThrew = checkThrew
+        }
     }
 
     /// ⚠️ Read FRESH FROM DISK every tick, never cached — otherwise it is not
@@ -32,7 +39,7 @@ enum KillSwitch {
     /// exists in one command for anyone with admin, and unlike a lever this
     /// one is loud — it raises `kill_switch_present` and shows in the UI as
     /// "enforcement disabled locally since 20:14".
-    static func check(now: Date = Date(), path: String = Paths.killSwitch) -> Status {
+    public static func check(now: Date = Date(), path: String = Paths.killSwitch) -> Status {
         guard FileManager.default.fileExists(atPath: path) else {
             return Status(present: false, until: nil, indefinite: false, checkThrew: false)
         }

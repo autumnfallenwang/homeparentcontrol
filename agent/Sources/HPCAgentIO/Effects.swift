@@ -5,7 +5,7 @@ import HPCCore
 ///
 /// Everything here is deliberately thin: the decision was already taken by
 /// `Ladder`, which is pure and tested. This file only carries it out.
-enum Effects {
+public enum Effects {
 
     // MARK: - The session bridge
 
@@ -15,7 +15,7 @@ enum Effects {
     /// console. That case is a **no-op, not a skip** (X10): there is nobody
     /// using the Mac and nothing to warn — and it must never be confused with
     /// "the warning failed", which is how lever #6 got written.
-    static func consoleUser() -> uid_t? {
+    public static func consoleUser() -> uid_t? {
         var info = stat()
         guard stat("/dev/console", &info) == 0 else { return nil }
         return info.st_uid >= 501 ? info.st_uid : nil
@@ -27,7 +27,7 @@ enum Effects {
     /// long-lived LaunchAgent: **a LaunchAgent runs as the child and is
     /// unloadable by her; the root daemon is not.**
     @discardableResult
-    static func asUser(_ uid: uid_t, _ argv: [String], timeout: TimeInterval = 20) -> Int32 {
+    public static func asUser(_ uid: uid_t, _ argv: [String], timeout: TimeInterval = 20) -> Int32 {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         task.arguments = ["asuser", String(uid)] + argv
@@ -54,7 +54,7 @@ enum Effects {
     /// Both surfaces are observed working on this build, including from a root
     /// daemon. Returns the outcome the ladder needs — and the three cases stay
     /// distinct all the way up.
-    static func warn(leadMinutes: Int, channel: String, displayName: String)
+    public static func warn(leadMinutes: Int, channel: String, displayName: String)
         -> Ladder.WarningOutcome
     {
         guard let uid = consoleUser() else { return .noConsoleUser }
@@ -97,13 +97,13 @@ enum Effects {
     /// 27's release date already reports the `CGSession` path gone. Replacing
     /// one undocumented dependency with another is not closing the problem, so
     /// ship both and find out at boot which still works.
-    enum LockPath: String, CaseIterable {
+    public enum LockPath: String, CaseIterable {
         /// Documented-ish, and the one Apple's own menu item uses.
         case pmsetDisplaySleep
         /// The classic. Reported gone on macOS 27.
         case cgSession
 
-        var argv: [String] {
+        public var argv: [String] {
             switch self {
             case .pmsetDisplaySleep:
                 return ["/usr/bin/pmset", "displaysleepnow"]
@@ -118,7 +118,7 @@ enum Effects {
 
     /// Assert the lock. Idempotent — already locked is a success, which is
     /// what makes re-locking every tick safe.
-    static func lock() -> Bool {
+    public static func lock() -> Bool {
         for path in LockPath.allCases {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: path.argv[0])
@@ -134,7 +134,7 @@ enum Effects {
 
     /// Which lock paths exist on this machine, checked once at boot so a
     /// missing one is discovered in daylight rather than at 21:30.
-    static func lockSelfTest() -> [String: Bool] {
+    public static func lockSelfTest() -> [String: Bool] {
         Dictionary(
             uniqueKeysWithValues: LockPath.allCases.map {
                 ($0.rawValue, FileManager.default.isExecutableFile(atPath: $0.argv[0]))
@@ -150,7 +150,7 @@ enum Effects {
     ///
     /// Build the safe variant with:
     ///     swift build -Xswiftc -DDEV_ENFORCEMENT
-    static func shutdown() -> Bool {
+    public static func shutdown() -> Bool {
         #if DEV_ENFORCEMENT
             FileHandle.standardError.write(
                 Data("DEV_ENFORCEMENT: shutdown suppressed (would have powered off)\n".utf8))

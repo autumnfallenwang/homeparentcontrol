@@ -1,5 +1,6 @@
 import Dispatch
 import Foundation
+import HPCAgentIO
 import HPCCore
 
 /// `enforcerd` — the tick loop (§3.2).
@@ -51,7 +52,7 @@ enum Enforcer {
         // ── 2. Load and verify.
         let current = try? String(contentsOfFile: Paths.currentPolicy, encoding: .utf8)
         let lkg = try? String(contentsOfFile: Paths.lkgPolicy, encoding: .utf8)
-        let keys = loadSigningKeys()
+        let keys = SigningKeys.load()
 
         let loaded: PolicyStore.Loaded
         switch PolicyStore.load(currentJWS: current, lkgJWS: lkg, keys: keys) {
@@ -131,16 +132,6 @@ enum Enforcer {
 
         // ── 8–9. Already decided and acted; these cannot change the outcome.
         Spool.writeHealth(tickSeq: tickSeq, lastDecision: decision, version: version)
-    }
-
-    static func loadSigningKeys() -> [PolicyStore.SigningKey] {
-        guard let data = FileManager.default.contents(atPath: Paths.signingKeys),
-              let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        else { return [] }
-        return rows.compactMap { row in
-            guard let kid = row["kid"] as? String, let x = row["x"] as? String else { return nil }
-            return PolicyStore.SigningKey(kid: kid, x: x)
-        }
     }
 
     static func start() {

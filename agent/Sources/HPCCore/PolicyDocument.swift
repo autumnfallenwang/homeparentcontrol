@@ -229,7 +229,7 @@ extension ISO8601DateFormatter {
     /// none, and §4.3's own examples show both forms — a reader that accepts
     /// only one is not the tolerant reader R1 asks for, and the failure mode
     /// is a policy that will not parse at all, which is fail-open.
-    static func hpcParse(_ text: String) -> Date? {
+    public static func hpcParse(_ text: String) -> Date? {
         withFraction.date(from: text) ?? withoutFraction.date(from: text)
     }
 }

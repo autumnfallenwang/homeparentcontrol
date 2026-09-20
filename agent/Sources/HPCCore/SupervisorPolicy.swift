@@ -243,7 +243,7 @@ public enum SupervisorPolicy {
     /// compares as **0**, so a version string the agent cannot read is never
     /// "newer" and therefore never installs itself. Guessing in the other
     /// direction would let a malformed `desired[]` spec trigger an install.
-    static func isNewer(_ lhs: String, than rhs: String) -> Bool {
+    public static func isNewer(_ lhs: String, than rhs: String) -> Bool {
         let left = lhs.split(separator: ".").map { Int($0) ?? 0 }
         let right = rhs.split(separator: ".").map { Int($0) ?? 0 }
         for index in 0..<max(left.count, right.count) {
