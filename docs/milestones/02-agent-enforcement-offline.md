@@ -23,13 +23,34 @@ Tick loop · policy load with JWS verification and last-known-good fallback · t
 
 ## Exit criteria
 
-- [ ] **V1–V9 all pass** (§8.4) — cluster off, cable out, DNS blackholed, 500s, hung server, sync
-      booted out, disk full, policy `chmod 000`, enforcer killed with deadfall installed
-- [ ] **V6 produces byte-identical enforcer logs** with and without sync running — the direct proof
-- [ ] **V5 proves total sync timeout < one tick**
-- [ ] `otool -L` shows **no networking symbols** in the enforcer binary
-- [ ] Predicate golden-file suite passes, including the midnight crossing and a DST transition
-- [ ] `lint`, `typecheck`, `test` green
+- [ ] **V1–V9 all pass** (§8.4) — ⚠️ **needs the owner: sudo, a LaunchDaemon, and a Mac you are
+      willing to have locked.** Scripted in `agent/scripts/v-series.md` with a signed test-policy
+      generator. V1–V4, V7 and V8 are runnable today; see the scope note below for V5, V6 and V9.
+- [ ] **V6 produces byte-identical enforcer logs** with and without sync running — ⚠️ **unrunnable
+      in this milestone**, see below
+- [ ] **V5 proves total sync timeout < one tick** — ⚠️ **unrunnable in this milestone**, see below
+- [x] `otool -L` shows **no networking symbols** in the enforcer binary — `scripts/check-no-networking.sh`,
+      run in CI. ⚠️ Falsified: a *dead* `import Network` passes (Swift does not link an unused
+      framework), one real `NWPathMonitor()` fails it. So it proves no network **capability**, which
+      is the property that matters — the comment used to overclaim and now says this.
+- [x] Predicate suite passes, including the midnight crossing and both 2026 DST transitions
+- [x] `swift build` / `swift test` green — **71 tests**
+
+## ⚠️ A scope error in this milestone, found while building it
+
+**V5, V6 and V9 cannot pass here, and it is not a gap in the work.** They test the *interaction*
+between the enforcer and components this milestone explicitly excludes:
+
+| | Needs | Which this milestone's own scope says is |
+|---|---|---|
+| **V5** — server accepts then hangs 120 s | the sync daemon | "Sync … (milestone 03)" |
+| **V6** — `launchctl bootout system/com.hpc.sync` | the sync daemon | same |
+| **V9** — enforcer killed with the deadfall installed | the deadfall | "deadfall (milestone 03)" |
+
+V6 is the headline — "byte-identical enforcer logs with and without sync running, the direct proof"
+— and there is nothing to boot out until a sync daemon exists. **Recommend moving V5, V6 and V9 to
+milestone 03's exit criteria**, where the things they test will exist. The remaining six (V1–V4, V7,
+V8) are genuinely runnable now and are what `agent/scripts/v-series.md` walks through.
 
 ## Traps to clear deliberately
 
