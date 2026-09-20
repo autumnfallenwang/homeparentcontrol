@@ -52,7 +52,7 @@ The skill picks a slug, writes the file with the right frontmatter, and updates 
 | [arch-cluster-access](./arch-cluster-access.md) | `reference` | Reaching k3s/Argo/Grafana from the Mac, and the `OutOfSync` red herring |
 | [zod-jsonschema-strict-default](./zod-jsonschema-strict-default.md) | `feedback` | `z.toJSONSchema()` silently emits a **strict** reader for the consuming language |
 | [sibling-carets-are-not-what-they-run](./sibling-carets-are-not-what-they-run.md) | `feedback` | A sibling's `^` range is not the version it runs — read the lockfile before copying its code |
-| [falsify-the-gate](./falsify-the-gate.md) | `feedback` | A safety test never seen to fail proves nothing — break what it guards, watch it go red, restore |
+| [falsify-the-gate](./falsify-the-gate.md) | `feedback` | A safety test never seen to fail proves nothing — break what it guards, watch it go red, restore. Re-falsify when it moves |
 | [better-auth-apikey-plugin](./better-auth-apikey-plugin.md) | `feedback` | `enableMetadata` is off by default, and the rate-limit throw carries **no** HTTP status |
 | [read-every-generated-baseline](./read-every-generated-baseline.md) | `feedback` | An unread golden/snapshot baseline enshrines the bug — read the values, not the test summary |
 | [failure-counters-outlive-rollback](./failure-counters-outlive-rollback.md) | `feedback` | A failure counter written inside the transaction the failure rolls back is decoration |

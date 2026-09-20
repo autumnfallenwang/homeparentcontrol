@@ -24,6 +24,13 @@ limiter throws an `APIError` carrying *no* HTTP status at all, so "401, not 429"
 the raw throw, and `lib/auth-errors.ts` is what makes it an honest 429. Falsifying the gate found a
 documentation error nobody was looking for. See [[better-auth-apikey-plugin]].
 
+**A gate that moves must be re-falsified at its new home.** Passing at one call site proves nothing
+at another. On 2026-09-20 B2 moved from a three-line `/whoami` stub to the real `POST /sync`, where
+every call also does a scope check, seven tripwire comparisons, six writes and a policy read. It
+stayed green — but "still green" could equally have meant "still sensitive" or "now measuring
+something else entirely", and nothing in the result distinguishes those. Re-arming the limiter at
+the new location did: it failed at exactly 10 again. Treat relocating a gate as writing a new one.
+
 **How to apply:** Whenever a test is the sole guard on an invariant with a silent or unbounded
 failure mode — X2, Invariant E ([[enforcement-invariant]]), the `overrides.expires_at` NOT NULL,
 the contract artefact guard — spend the extra two minutes:

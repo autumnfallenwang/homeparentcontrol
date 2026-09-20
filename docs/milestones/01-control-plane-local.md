@@ -151,6 +151,39 @@ Argo CD, Loki, alerting). The 11 cluster verifications stay blocked until k3s is
   Loki-specific code**; **C6 ❌ there is no alerting in the cluster at all** — no rules, no contact
   points, no notifiers, and the three live apps have none either. Recorded in
   [[arch-cluster-access]] and reflected in milestone 05.
+- 2026-09-20: **Phase 2 step 4b shipped — `POST /sync` and `GET /api/agent/v1/health`.** The tick
+  works end to end: first tick flips `enrolled → active` and returns the full signed policy, second
+  tick with a matching ETag returns `unchanged: true` with no payload. **`/events` is all that
+  remains of step 4.**
+- 2026-09-20: **B2 finally lives where the spec always put it.** The gate has been passing against a
+  `/whoami` stub since step 2; it now runs 30 consecutive real `/sync` calls. Falsified on its new
+  home before being trusted — re-arming the per-key limiter makes it fail at **exactly 10 × 200**,
+  the documented quota, even though each call now also does a scope check, seven tripwire
+  comparisons, six writes and a policy read. The `/whoami` version stays as a faster canary that
+  isolates the credential path, explicitly labelled as *not* the gate.
+- 2026-09-20: **Two documented writers for `health_state`, now one.** §5.2 says the sync handler
+  writes it every tick; §7.3 says a liveness job evaluates every device once a minute. Sync writes
+  the six factual columns and nothing else. ⚠️ **`health_state` therefore reads `UNENROLLED` even
+  after a successful tick** until step 5's liveness job lands. That is correct, not broken, and a
+  test asserts it so nobody "fixes" it.
+- 2026-09-20: **Cadence trusts the agent's reported boundary.** "Boundary mode" needs the next
+  transition, and the only one on the wire is the agent-reported `next_boundary_at`. Recomputing it
+  server-side would mean a second DST-correct resolver — unspecified, unscheduled, and free to drift
+  against the Swift one. §4.2 already lets the agent shorten its own interval, and cadence is not a
+  safety control (enforcement is a separate daemon on an unconditional 60 s tick), so the worst a
+  lying agent achieves is polling more often. Clamped to [1s, 300s] server-side, which §4.2 specifies
+  only as the *agent's* clamp.
+- 2026-09-20: **R4 vs R6 resolved in R6's favour for `desired[]`.** R4 says send a device only what
+  it advertised; R6 says an unknown kind must come back `unsupported`, terminal. Pre-filtering would
+  satisfy R4 and make R6 unreachable — the item would silently never ship. R4 is applied to
+  `server_capabilities`, which is what it is actually about; a kind outside the device's advertised
+  set is sent and **logged**. Also: `converged[]` is a claim §4.5 tells the server to ignore, so its
+  only live use is carrying `unsupported`; `agent_version` converges on the server's own observation.
+- 2026-09-20: **Seven of nine tripwires raised, two deliberately not.**
+  `unexpected_source_ip` needs a known-IP baseline no table holds, and `concurrent_boot_ids` has no
+  definition anywhere that separates it from `agent_stopped_while_up`. Guessing at either produces a
+  banner the parent cannot act on. The seven each have their own test case, because a tripwire that
+  never fires is invisible — the same shape as 4a's `attempts` bug.
 - 2026-09-20: **Phase 2 step 4a shipped — enrolment, signing and the agent error model.** Step 4 was
   split at the exit criterion's own seam; **the first half now holds end to end**: `curl` enrols a
   device and fetches a signed policy, and the JWS verifies using only the JWK the enrolment response

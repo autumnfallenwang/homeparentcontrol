@@ -5,6 +5,7 @@ import { db } from "../db/index.js";
 import { devices, policyVersions } from "../db/schema.js";
 import { agentOnError, ProblemError } from "../lib/problem.js";
 import { type AuthVariables, requireAgentAuth } from "../middleware/auth.js";
+import { handleSync } from "./sync.js";
 
 /**
  * The agent's half of the API, mounted at `/api/agent/v1`.
@@ -123,3 +124,9 @@ agentApp.get("/policy", requireDevice, async (c) => {
     current.jws ? { ...base, jws: current.jws } : { ...base, document: current.document },
   );
 });
+
+/**
+ * `POST /api/agent/v1/sync` — the tick, and the heartbeat (A.26). The handler
+ * lives in `sync.ts`; this file stays a routing table.
+ */
+agentApp.post("/sync", requireDevice, handleSync);

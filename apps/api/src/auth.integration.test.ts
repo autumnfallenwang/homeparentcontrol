@@ -170,23 +170,15 @@ d("X2 — the carve-out", () => {
   });
 
   /**
-   * ★ B2 — THE GATE. Non-negotiable.
+   * A fast canary on the credential path.
    *
-   * better-auth's per-key limiter defaults to 10 requests per 24h. If it ever
-   * comes back on, a device stops syncing ~10 minutes after enrolment and
-   * keeps enforcing a policy it can never update again.
-   *
-   * 30 consecutive calls is three times the default quota. Sequential on
-   * purpose: the limiter counts requests, and parallel calls could race past
-   * the counter and pass by accident.
-   *
-   * ✅ Falsified 2026-09-20 — this test does not pass vacuously. Turning the
-   * limiter back on at places 1 and 2 makes it fail at exactly 10 × 200, which
-   * is the documented quota. Both 401 and 429 are checked because the status
-   * depends on whether `lib/auth-errors.ts` is in the chain: raw it is 401,
-   * classified it is 429. Either means the carve-out is gone.
+   * ⚠️ NOT B2 any more. The gate proper lives in
+   * `routes/sync.integration.test.ts` — the spec always named `/sync`, and
+   * since step 4b that endpoint exists. This stays because it isolates the
+   * credential path from everything `/sync` also does (scope check, tripwires,
+   * six writes, a policy read), so if both fail the difference says where.
    */
-  it("PLACE 4 (B2) — 30 consecutive authenticated calls all return 200", async () => {
+  it("30 consecutive authenticated calls all return 200", async () => {
     const { token } = await enrolledKey();
 
     const statuses: number[] = [];

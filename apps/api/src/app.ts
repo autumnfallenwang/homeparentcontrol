@@ -1,3 +1,4 @@
+import { CONTRACT_MINOR } from "@hpc/contract";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { auth } from "./auth.js";
@@ -51,7 +52,29 @@ export function createApp() {
   app.use("/api/auth/*", signupGate);
   app.on(["POST", "GET"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 
+  // The k8s probe. Distinct from the agent's, below.
   app.get("/health", (c) => c.json({ status: "ok" }));
+
+  /**
+   * `GET /api/agent/v1/health` — §4.5's unauthenticated liveness of the
+   * SERVER, which the agent uses to tell "the control plane is down" from "my
+   * credential is bad".
+   *
+   * ⚠️ Deliberately reads no database. It reports whether this process is
+   * serving, not whether any device is healthy — A.26 keeps the latter on the
+   * tick. Having no failure path is also why it needs no agent `onError`, and
+   * so lives here rather than on a third Hono instance.
+   *
+   * `contract_versions` is plural in the contract: the minors this server
+   * speaks (R3 — major in the path, minor in a field).
+   */
+  app.get("/api/agent/v1/health", (c) =>
+    c.json({
+      status: "ok",
+      contract_versions: [CONTRACT_MINOR],
+      server_time: new Date().toISOString(),
+    }),
+  );
 
   app.route("/api/parent/v1", parentApp);
 
