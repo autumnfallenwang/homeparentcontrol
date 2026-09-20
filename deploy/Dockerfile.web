@@ -1,0 +1,46 @@
+FROM node:22-alpine AS builder
+
+RUN corepack enable && corepack prepare pnpm@10.29.3 --activate
+
+WORKDIR /app
+
+# Monorepo root files
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.json ./
+
+# Contract package
+COPY packages/contract/package.json packages/contract/
+COPY packages/contract/src/ packages/contract/src/
+COPY packages/contract/tsconfig.json packages/contract/
+
+# Web package
+COPY apps/web/ apps/web/
+
+RUN pnpm install --frozen-lockfile
+
+# NEXT_PUBLIC_API_URL is inlined into the client bundle at build time (Next
+# evaluates it during `next build`), so CI passes it as a build arg. The chart
+# additionally sets API_URL at runtime for SSR fetches over in-cluster Service
+# DNS. No auth yet — NEXT_PUBLIC_AUTH_URL arrives in phase 2.
+ARG NEXT_PUBLIC_API_URL=http://localhost:3001
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+RUN pnpm --filter @hpc/web build
+
+# --- Production stage ---
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Chown to node:node so the non-root USER below can read it. Next writes to
+# .next/cache at runtime, so readOnlyRootFilesystem stays off in the chart.
+COPY --from=builder --chown=node:node /app/apps/web/.next/standalone ./
+COPY --from=builder --chown=node:node /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder --chown=node:node /app/apps/web/public ./apps/web/public
+
+USER node
+
+EXPOSE 52000
+
+ENV PORT=52000
+ENV HOSTNAME=0.0.0.0
+
+CMD ["node", "apps/web/server.js"]

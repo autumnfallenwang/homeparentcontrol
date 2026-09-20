@@ -8,7 +8,9 @@ Run the typecheck command for homeparentcontrol. Validates the codebase's static
 
 ## Commands
 
-- **typescript (tsc)**: `pnpm tsc --noEmit`
+- **typescript (tsc)**: `pnpm typecheck` — the root turbo task, which fans out to every workspace.
+  ⚠️ **Not** a bare `pnpm tsc --noEmit`: the root `tsconfig.json` is a pure base with no `include`,
+  so running tsc at the root checks nothing and exits 0. That would be a silently useless gate.
 - **swift (swiftc via SwiftPM)**: `swift build --package-path agent` — the agent is a macOS SwiftPM package, not an iOS app; there is no Xcode project and no simulator involved
 
 ## Reporting

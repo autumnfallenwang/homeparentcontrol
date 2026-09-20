@@ -1,0 +1,40 @@
+FROM node:22-alpine
+
+# Corepack caches the pnpm tarball under $COREPACK_HOME, which defaults to
+# root's home. With `USER node` at runtime the cache is unreadable, so corepack
+# re-downloads pnpm from registry.npmjs.org on EVERY cold container start — and
+# with no network the container fails to boot outright (verified: exit 1, DNS
+# failure). In k3s that is a crashloop on any pod restart during an npm outage.
+# Point COREPACK_HOME somewhere the runtime user owns.
+ENV COREPACK_HOME=/home/node/.cache/corepack
+RUN corepack enable && corepack prepare pnpm@10.29.3 --activate
+
+WORKDIR /app
+
+# Monorepo root files
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.json ./
+
+# Contract package (source-only — no build step)
+COPY packages/contract/package.json packages/contract/
+COPY packages/contract/src/ packages/contract/src/
+COPY packages/contract/tsconfig.json packages/contract/
+
+# API package — including drizzle/ migrations, used by the Helm pre-upgrade Job
+# and by `pnpm db:migrate` locally.
+COPY apps/api/package.json apps/api/
+COPY apps/api/src/ apps/api/src/
+COPY apps/api/tsconfig.json apps/api/
+COPY apps/api/drizzle.config.ts apps/api/
+COPY apps/api/drizzle/ apps/api/drizzle/
+
+# Install, then hand ownership to `node` (UID 1000) so the non-root runtime can
+# read everything. Without the chown, USER node fails on any path it must read.
+RUN pnpm install --frozen-lockfile && chown -R node:node /app /home/node/.cache
+
+USER node
+
+# Container port. The chart maps Service targetPort here; the port the process
+# actually listens on comes from API_PORT (52001 in k3s).
+EXPOSE 52001
+
+CMD ["pnpm", "--filter", "@hpc/api", "start"]

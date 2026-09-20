@@ -1,0 +1,45 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Serialize back-to-back main pushes so an in-flight arch-infra bump (phase 5)
+# is not cancelled mid-clone-push. Present from the start so phase 5 does not
+# have to retrofit it.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Unit tests do not connect to a DB, but src/db/index.ts constructs a
+    # postgres client at module load. postgres-js connects lazily so this is
+    # safe, but supply a dummy anyway so the import chain is unambiguous on CI.
+    env:
+      DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.29.3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      # CI runs the fast (DB-free) suite. Integration tests need a live Postgres
+      # the runner does not ship.
+      - run: pnpm test:fast
+
+# build-and-deploy + bump-arch-infra land in phase 5 with the rest of the
+# GitOps chain. See docs/milestones/05-cluster-deployment.md.

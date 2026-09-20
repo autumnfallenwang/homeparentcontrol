@@ -80,3 +80,23 @@ Argo CD, Loki, alerting). The 11 cluster verifications stay blocked until k3s is
 - 2026-09-18: Milestone opened. Scaffold, requirements, spec and ADRs in place; no code yet.
 - 2026-09-18: X8 and X9 ruled ahead of phase 3 — see ADR 0004. The spec flags these as needing a
   decision before the enforcer is written; that is now unblocked.
+- 2026-09-18: **Phase 0 complete.** pnpm/turbo monorepo scaffolded — `apps/api`, `apps/web`,
+  `packages/contract` — following `homework`'s conventions. `pnpm install`, `lint`, `typecheck` and
+  `test:fast` all green (8 tests, 3 workspaces); `next build` produces standalone output and
+  resolves `@hpc/contract` through the `extensionAlias` path; API serves `/health` with structured
+  `req_id` logs. Decisions: zod 4 (R9 needs native `z.toJSONSchema()`), newest-of-the-two dep pins,
+  `casing: "snake_case"` pending the B1 gate. Dev Postgres on **5433**, not 5432 — homework's dev
+  container already claims 5432 on the host.
+- 2026-09-18: **Full stack verified end to end.** Docker started, Postgres 17.11 on 5433, `pnpm dev`
+  serving api :3001 + web :3000, CORS preflight correct, drizzle client querying the real database,
+  both Docker images built and run (non-root `uid=1000`), web rendering contract values from
+  `@hpc/contract` inside the container.
+- 2026-09-18: ⚠️ **Found and fixed a latent Dockerfile defect inherited from the house pattern.**
+  `CMD ["pnpm", ...]` under `USER node` re-downloaded pnpm from npmjs.org on every cold container
+  start — and **failed to boot entirely with no network** (exit 1, DNS failure). A `docker restart`
+  hides it; k8s creates a new container per pod restart, so it would crashloop during an npm outage.
+  Fixed with `COREPACK_HOME` + chown. **`homework` and `homecal` ship the same unpatched file.**
+  Captured as [[corepack-runtime-download]].
+- 2026-09-18: Fixed two defects in the devkit-generated skills: `devkit-typecheck` and `devkit-test`
+  used bare `pnpm tsc --noEmit` / `pnpm vitest run`, which in a turbo monorepo check nothing and
+  find nothing respectively. Both now call the root turbo tasks.

@@ -8,9 +8,11 @@ Run the test suite for homeparentcontrol. If `$ARGUMENTS` contains the word `fas
 
 ## Commands
 
-- **typescript (vitest)**
-  - run: `pnpm vitest run`
-  - fast: `pnpm vitest run --exclude '**/*.integration.*'`
+- **typescript (vitest)** — the root turbo tasks, which fan out to every workspace.
+  ⚠️ **Not** a bare `pnpm vitest run`: there is no vitest config at the repo root, so it would
+  find no tests and exit non-zero.
+  - run: `pnpm test`
+  - fast: `pnpm test:fast`
 - **swift (xctest via SwiftPM)** — the agent is a macOS SwiftPM package, not an iOS app
   - run: `swift test --package-path agent`
   - fast: `swift test --package-path agent --filter '^(?!.*Integration)'`

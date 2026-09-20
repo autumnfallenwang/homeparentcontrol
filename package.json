@@ -1,0 +1,26 @@
+{
+  "name": "homeparentcontrol",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.29.3",
+  "scripts": {
+    "predev": "./scripts/db-start.sh",
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "test": "turbo test",
+    "test:fast": "turbo test:fast",
+    "typecheck": "turbo typecheck",
+    "lint": "turbo lint",
+    "lint:fix": "turbo lint:fix"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@biomejs/biome",
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.4",
+    "turbo": "^2.8.10"
+  }
+}
