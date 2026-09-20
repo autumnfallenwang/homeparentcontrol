@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
-import { assertRetentionInvariant, config } from "./config.js";
+import { assertRetentionInvariant, assertSigningConfigured, config } from "./config.js";
 import { assertNoRateLimitedDeviceKeys } from "./lib/assert-x2.js";
 import { claimFirstHouseholdAtBoot } from "./lib/bootstrap.js";
 import { log } from "./lib/logger.js";
@@ -15,6 +15,14 @@ try {
   assertRetentionInvariant(config);
 } catch (err) {
   log.error({ event: "config.error", err: (err as Error).message }, "retention invariant violated");
+  process.exit(1);
+}
+
+// A.16 — refuse to serve unauthenticated policy without an explicit opt-in.
+try {
+  assertSigningConfigured(config);
+} catch (err) {
+  log.error({ event: "config.error", err: (err as Error).message }, "refusing to start");
   process.exit(1);
 }
 

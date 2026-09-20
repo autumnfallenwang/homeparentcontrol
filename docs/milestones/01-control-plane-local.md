@@ -151,6 +151,46 @@ Argo CD, Loki, alerting). The 11 cluster verifications stay blocked until k3s is
   Loki-specific code**; **C6 ❌ there is no alerting in the cluster at all** — no rules, no contact
   points, no notifiers, and the three live apps have none either. Recorded in
   [[arch-cluster-access]] and reflected in milestone 05.
+- 2026-09-20: **Phase 2 step 4a shipped — enrolment, signing and the agent error model.** Step 4 was
+  split at the exit criterion's own seam; **the first half now holds end to end**: `curl` enrols a
+  device and fetches a signed policy, and the JWS verifies using only the JWK the enrolment response
+  handed back. Tampering is rejected. 4b is `/sync`, `/events`, `/health`.
+- 2026-09-20: ⚠️ **A safety collision, now closed structurally.** §4.7's status table is global —
+  `410 → decommission`, the one `hpc_action` that stops enforcement — while §5.5 uses `410` on
+  `POST /enroll` for an expired code, and `/enroll` is the only unauthenticated endpoint in the
+  system. Read literally, the single wire signal that stops enforcement was reachable with no
+  credential. **Pre-credential responses now carry no `hpc_action` at all**, and a test asserts no
+  problem in the registry can emit `decommission`. The contract had recorded this and declined to
+  resolve it; it is resolved.
+- 2026-09-20: **Unsigned policy now takes an explicit opt-in.** The spec has no signing on/off flag
+  and gives `policy_unsigned` no health consequence anywhere — no degraded state, no tripwire, no
+  alert — so a control plane that quietly stopped signing was indistinguishable from one that signs.
+  Boot refuses without `POLICY_SIGNING_KEY` unless `ALLOW_UNSIGNED_POLICY=1` says so deliberately.
+- 2026-09-20: **Four signing blanks filled**, none of them specified: `kid` is the **RFC 7638 JWK
+  thumbprint** (the spec gives `kid` no source at all — one env var, no key table);
+  `POLICY_SIGNING_KEY` is **PKCS#8 PEM**, with literal `\n` accepted; `policy_signing_keys[]`
+  elements are **public JWKs**, typed as plain strings so an agent can skip an `alg` it does not
+  know (R1); and problem `type` URIs are rooted at the **API** host — §4.7's one example points at
+  the Next.js UI's.
+- 2026-09-20: **Two bugs the tests caught, both mine.** (1) `attempts++` lived inside the claim
+  transaction that then throws, so every rejection rolled the counter straight back and an enrolment
+  code could never burn — the counter now lives outside any transaction that can fail. (2) Agent
+  401s returned the parent's flat `{error}`, carrying **no `hpc_action`** — which is exactly the X1b
+  mapping that matters most. `resolveSession` now holds the shared logic and each sub-app shapes its
+  own failures.
+- 2026-09-20: **`session.id` IS the API key's id** on better-auth 1.4.19 — measured against
+  `verifyApiKey().key.id`, not documented anywhere. That is how `requireDevice` resolves the caller
+  in one lookup instead of a second verification. If a future version changes it the lookup finds
+  nothing and the caller gets 403 (fail-closed, enforcement continues per X1b), and
+  `policy.integration.test.ts` pins the equivalence so it breaks in CI rather than in production.
+- 2026-09-20: ⚠️ **`GET /policy` must never look like liveness.** §4.5 says operators poll it "with
+  `curl` constantly" and A.26 makes the tick the heartbeat — so if a read there touched
+  `last_sync_at`, an operator curling a dead device's policy would keep it looking HEALTHY. The spec
+  never says this; a test asserts the device row is byte-identical across 200, 304 and 404.
+- 2026-09-20: ⚠️ **No key rotation exists in the spec.** `policy_signing_keys[]` is an array, but it
+  is delivered only in the enrolment response, which an enrolled agent never fetches again — so
+  there is no channel to give a rotated key to a running device. Not built; recorded so it is not
+  discovered during a rotation.
 - 2026-09-20: **Phase 2 step 3 — the policy compiler shipped.** Three layers, because §9's "pure
   function" and the milestone's "emits nothing when the content hash is unchanged" cannot both be
   true of one function: `gather` (DB + live `date-holidays`) → `compilePolicy` (pure, 14 golden

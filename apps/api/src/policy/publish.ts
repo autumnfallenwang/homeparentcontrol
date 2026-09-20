@@ -5,6 +5,7 @@ import { log } from "../lib/logger.js";
 import { contentHash, etagFor } from "./canonical.js";
 import { compilePolicy } from "./compile.js";
 import { gatherCompilerInput } from "./gather.js";
+import { getSigningKey, signPolicy } from "./signing.js";
 import { PolicyCompileError, type PublishReason, type PublishResult } from "./types.js";
 
 export interface PublishArgs {
@@ -27,9 +28,13 @@ export interface PublishArgs {
  * hash is unchanged". This is where that lives; `compilePolicy` itself is pure
  * and cannot decide not to emit.
  *
- * ⚠️ Signing is NOT here. `jws` and `signing_key_id` stay null for now and the
+ * Signing happens here, over the parsed document, so the bytes in the JWS are
+ * exactly the contract-conformant ones the agent will parse after verifying.
+ *
+ * ⚠️ When no key is configured, `jws` and `signing_key_id` stay null and the
  * contract's third sync-envelope variant (`document` in the clear, agent logs
- * `policy_unsigned`) carries it. Ed25519 + `POLICY_SIGNING_KEY` land in step 4.
+ * `policy_unsigned`) carries it. That state is reachable only by setting
+ * ALLOW_UNSIGNED_POLICY=1 — `index.ts` refuses to start otherwise.
  */
 export async function publishPolicy(args: PublishArgs): Promise<PublishResult> {
   const now = args.now ?? new Date();
@@ -70,6 +75,12 @@ export async function publishPolicy(args: PublishArgs): Promise<PublishResult> {
     const version = (current?.version ?? 0) + 1;
     const etag = etagFor(hash, version);
 
+    // A.16 — compact JWS over the document. `kid` is the key's RFC 7638
+    // thumbprint, which is also what `policy_signing_keys[]` carries, and is
+    // how the agent picks the right key to verify with.
+    const key = getSigningKey();
+    const jws = key ? signPolicy(document, key) : null;
+
     await tx.insert(policyVersions).values({
       householdId: input.household.id,
       deviceId: args.deviceId,
@@ -80,8 +91,8 @@ export async function publishPolicy(args: PublishArgs): Promise<PublishResult> {
       // and this column is for psql archaeology.
       document,
       documentHash: hash,
-      jws: null,
-      signingKeyId: null,
+      jws,
+      signingKeyId: key?.kid ?? null,
       etag,
       issuedAt: now,
       notBefore: now,
@@ -103,6 +114,7 @@ export async function publishPolicy(args: PublishArgs): Promise<PublishResult> {
         version,
         reason: args.reason,
         overrides: document.overrides.length,
+        signed: jws !== null,
       },
       "compiled a new policy version",
     );

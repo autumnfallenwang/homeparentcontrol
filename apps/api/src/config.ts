@@ -27,6 +27,21 @@ export const config = {
   rateLimitPerMin: Number(process.env.RATE_LIMIT_PER_MIN ?? 600),
 
   /**
+   * The Ed25519 policy signing key, PKCS#8 PEM (A.16). Generate with
+   * `openssl genpkey -algorithm ed25519`. In the cluster it is the
+   * `POLICY_SIGNING_KEY` entry of `homeparentcontrol-secrets`.
+   *
+   * Literal `\n` sequences are accepted, because a multi-line PEM in an env
+   * var is awkward in both a shell and a Helm values file.
+   */
+  policySigningKey: process.env.POLICY_SIGNING_KEY?.trim()
+    ? process.env.POLICY_SIGNING_KEY.replace(/\\n/g, "\n")
+    : undefined,
+
+  /** Explicit opt-in to serving unsigned policy. See assertSigningConfigured. */
+  allowUnsignedPolicy: process.env.ALLOW_UNSIGNED_POLICY === "1",
+
+  /**
    * Retention ladder (§5.7). Raw samples are the bulk; everything projected
    * from them outlives them, so a pruned window is still visibly pruned in
    * reports rather than silently absent.
@@ -45,6 +60,32 @@ export const config = {
 } as const;
 
 export type Config = typeof config;
+
+/**
+ * ⚠️ Refuse to start unsigned unless somebody said so out loud.
+ *
+ * The spec has no signing on/off switch — "disabled" is simply the absence of
+ * a key — and `policy_unsigned` appears in no degraded list, no tripwire list
+ * and no alert rule. So a control plane that quietly stopped signing would be
+ * indistinguishable, to the parent, from one that signs: the agent would log a
+ * line nobody reads and keep enforcing an unauthenticated policy.
+ *
+ * Making the dangerous configuration unreachable by accident is cheaper than
+ * detecting it later, and matches how X2 and the retention ladder are handled.
+ * Local dev sets ALLOW_UNSIGNED_POLICY=1 deliberately.
+ */
+export function assertSigningConfigured(
+  c: Pick<Config, "policySigningKey" | "allowUnsignedPolicy">,
+): void {
+  if (!c.policySigningKey && !c.allowUnsignedPolicy) {
+    throw new Error(
+      "POLICY_SIGNING_KEY is not set. Policy would be served unsigned, which the agent " +
+        "logs once and otherwise ignores — there is no health state for it. Set the key " +
+        "(openssl genpkey -algorithm ed25519), or set ALLOW_UNSIGNED_POLICY=1 to say so " +
+        "deliberately.",
+    );
+  }
+}
 
 /**
  * ⚠️ Hard invariant (§5.7) — refuse to start if violated.

@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import { closeDb, db } from "./db/index.js";
-import { apikeys, householdMembers, households, users } from "./db/schema.js";
+import { apikeys, children, devices, householdMembers, households, users } from "./db/schema.js";
 import { assertNoRateLimitedDeviceKeys } from "./lib/assert-x2.js";
 import { claimFirstHousehold } from "./lib/bootstrap.js";
 import { mintDeviceKey } from "./lib/device-keys.js";
@@ -19,6 +19,19 @@ const d = hasDb ? describe : describe.skip;
 const app = createApp();
 
 const PASSWORD = "correct-horse-battery-staple";
+
+/**
+ * A device row for the key to hang off. `/whoami` resolves the caller through
+ * `devices.api_key_id` (§5.9 — scope is the security control), so a key bound
+ * to nothing is a 403 by design.
+ */
+async function deviceFor(householdId: string): Promise<string> {
+  const childId = randomUUID();
+  const deviceId = randomUUID();
+  await db.insert(children).values({ id: childId, householdId, displayName: "Lucy" });
+  await db.insert(devices).values({ id: deviceId, householdId, childId, label: "Lucy's Mac mini" });
+  return deviceId;
+}
 
 /** The household the first sign-up claimed, with its service user resolved. */
 async function claimedHousehold(): Promise<{ id: string; serviceUserId: string }> {
@@ -126,12 +139,15 @@ d("X2 — the carve-out", () => {
   async function enrolledKey(): Promise<{ token: string; keyId: string }> {
     await signUp("parent@hpc.local", "Parent");
     const h = await claimedHousehold();
-    return mintDeviceKey({
+    const deviceId = await deviceFor(h.id);
+    const key = await mintDeviceKey({
       serviceUserId: h.serviceUserId,
-      deviceId: randomUUID(),
+      deviceId,
       householdId: h.id,
       label: "Lucy's Mac mini",
     });
+    await db.update(devices).set({ apiKeyId: key.keyId }).where(eq(devices.id, deviceId));
+    return key;
   }
 
   it("PLACE 2 — a minted device key has rate_limit_enabled = false", async () => {
@@ -209,12 +225,15 @@ d("agent credential path", () => {
   it("resolves a real key to the service user", async () => {
     await signUp("parent@hpc.local", "Parent");
     const h = await claimedHousehold();
-    const { token } = await mintDeviceKey({
+    const deviceId = await deviceFor(h.id);
+    const key = await mintDeviceKey({
       serviceUserId: h.serviceUserId,
-      deviceId: randomUUID(),
+      deviceId,
       householdId: h.id,
       label: "Lucy's Mac mini",
     });
+    await db.update(devices).set({ apiKeyId: key.keyId }).where(eq(devices.id, deviceId));
+    const token = key.token;
 
     const res = await app.request("/api/agent/v1/whoami", { headers: { "x-api-key": token } });
     expect(res.status).toBe(200);
@@ -228,7 +247,7 @@ d("A.21 — device keys survive deleting a parent", () => {
     const h = await claimedHousehold();
     const { keyId } = await mintDeviceKey({
       serviceUserId: h.serviceUserId,
-      deviceId: randomUUID(),
+      deviceId: await deviceFor(h.id),
       householdId: h.id,
       label: "Lucy's Mac mini",
     });

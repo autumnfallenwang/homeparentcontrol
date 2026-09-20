@@ -55,3 +55,4 @@ The skill picks a slug, writes the file with the right frontmatter, and updates 
 | [falsify-the-gate](./falsify-the-gate.md) | `feedback` | A safety test never seen to fail proves nothing — break what it guards, watch it go red, restore |
 | [better-auth-apikey-plugin](./better-auth-apikey-plugin.md) | `feedback` | `enableMetadata` is off by default, and the rate-limit throw carries **no** HTTP status |
 | [read-every-generated-baseline](./read-every-generated-baseline.md) | `feedback` | An unread golden/snapshot baseline enshrines the bug — read the values, not the test summary |
+| [failure-counters-outlive-rollback](./failure-counters-outlive-rollback.md) | `feedback` | A failure counter written inside the transaction the failure rolls back is decoration |

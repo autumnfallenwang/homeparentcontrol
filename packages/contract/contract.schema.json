@@ -1175,12 +1175,31 @@
         "code": {
           "type": "string",
           "pattern": "^HPC(-[0-9A-HJKMNP-TV-Z]{4}){3}$"
+        },
+        "hardware_uuid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "os_version": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "agent_version": {
+          "type": "string"
         }
       },
       "required": [
-        "code"
-      ],
-      "additionalProperties": {}
+        "code",
+        "hardware_uuid"
+      ]
     },
     "EnrolmentResponse": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1222,7 +1241,33 @@
           "type": "array",
           "items": {
             "type": "object",
-            "properties": {},
+            "properties": {
+              "kid": {
+                "type": "string"
+              },
+              "kty": {
+                "type": "string"
+              },
+              "crv": {
+                "type": "string"
+              },
+              "x": {
+                "type": "string"
+              },
+              "alg": {
+                "type": "string"
+              },
+              "use": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kid",
+              "kty",
+              "crv",
+              "x",
+              "alg"
+            ],
             "additionalProperties": {}
           }
         },

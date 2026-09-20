@@ -3,9 +3,14 @@ import { cors } from "hono/cors";
 import { auth } from "./auth.js";
 import { config } from "./config.js";
 import { requestLogger } from "./middleware/logger.js";
-import { apiRateLimiter } from "./middleware/rate-limit.js";
+import {
+  apiRateLimiter,
+  enrolGlobalRateLimiter,
+  enrolIpRateLimiter,
+} from "./middleware/rate-limit.js";
 import { signupGate } from "./middleware/signup-gate.js";
 import { agentApp } from "./routes/agent.js";
+import { enrolApp } from "./routes/enroll.js";
 import { parentApp } from "./routes/parent.js";
 
 /**
@@ -49,6 +54,21 @@ export function createApp() {
   app.get("/health", (c) => c.json({ status: "ok" }));
 
   app.route("/api/parent/v1", parentApp);
+
+  // ⚠️ BEFORE agentApp, and on its own instance. `/enroll` is the only
+  // unauthenticated write endpoint; `agentApp` applies requireAuth to
+  // everything on it, so enrolment cannot live there.
+  //
+  // Its own hard limiters: 5/min/IP and 20/hour globally, because it is the
+  // only route reachable without a credential. ⚖️ Never tighten these to the
+  // point where a parent fat-fingering a code three times locks themselves out
+  // of adding their own Mac.
+  if (process.env.NODE_ENV !== "test") {
+    app.use("/api/agent/v1/enroll", enrolIpRateLimiter);
+    app.use("/api/agent/v1/enroll", enrolGlobalRateLimiter);
+  }
+  app.route("/api/agent/v1/enroll", enrolApp);
+
   app.route("/api/agent/v1", agentApp);
 
   return app;

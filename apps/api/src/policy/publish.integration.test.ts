@@ -16,6 +16,7 @@ import {
 } from "../db/schema.js";
 import { gatherCompilerInput } from "./gather.js";
 import { publishPolicy } from "./publish.js";
+import { getSigningKey } from "./signing.js";
 import { PolicyCompileError } from "./types.js";
 
 /**
@@ -174,15 +175,25 @@ d("publishPolicy", () => {
     expect(await versionCount(f.deviceId)).toBe(2);
   });
 
-  it("leaves jws null — signing is step 4", async () => {
+  it("signs when a key is configured, and records its kid", async () => {
     const f = await seed();
     await publishPolicy({ deviceId: f.deviceId, reason: "enrol", now: NOW });
     const [row] = await db
       .select({ jws: policyVersions.jws, signingKeyId: policyVersions.signingKeyId })
       .from(policyVersions)
       .where(eq(policyVersions.deviceId, f.deviceId));
-    expect(row?.jws).toBeNull();
-    expect(row?.signingKeyId).toBeNull();
+
+    const key = getSigningKey();
+    if (key) {
+      // Three base64url segments, and the kid is the key's own thumbprint —
+      // which is what `policy_signing_keys[]` hands the agent.
+      expect(row?.jws?.split(".")).toHaveLength(3);
+      expect(row?.signingKeyId).toBe(key.kid);
+    } else {
+      // The unsigned path, reachable only via ALLOW_UNSIGNED_POLICY=1.
+      expect(row?.jws).toBeNull();
+      expect(row?.signingKeyId).toBeNull();
+    }
   });
 
   it("records the publish reason and author", async () => {
