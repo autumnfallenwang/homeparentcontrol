@@ -262,6 +262,93 @@ is the one failure a parent cannot explain to a child.
 
 ---
 
+## V-PKG-1 and the supervisor's rollback — **the one thing still unproven**
+
+⚠️ **The whole offline-recovery story rests on a claim nobody has checked.**
+`.pkg` downgrade was observed only in the *user* domain; `installer -target /`
+as root is untested, and §6.4's entire rollback path is
+`installer -pkg pkgs/<last-good>.pkg -target /`. If root-domain `installer`
+refuses to go backwards, the supervisor's recovery path does not exist and
+every table entry claiming "No human? No network? < 1 min" is wrong.
+
+Everything else in this file can be checked in an evening. This one changes
+the design if it fails, so run it first.
+
+```sh
+# Two packages, a version apart.
+./agent/scripts/build-pkg.sh 0.1.0
+./agent/scripts/build-pkg.sh 0.2.0
+
+sudo mkdir -p /var/db/homeparentcontrol/pkgs
+for v in 0.1.0 0.2.0; do
+  sudo cp "agent/.build/pkg/homeparentcontrol-$v.pkg"        \
+          "/var/db/homeparentcontrol/pkgs/$v.pkg"
+  sudo cp "agent/.build/pkg/homeparentcontrol-$v.pkg.sha256" \
+          "/var/db/homeparentcontrol/pkgs/$v.pkg.sha256"
+done
+
+# ── V-PKG-1 itself: forward, then BACKWARD, both as root.
+sudo /usr/sbin/installer -pkg /var/db/homeparentcontrol/pkgs/0.2.0.pkg -target /
+pkgutil --pkg-info com.hpc.agent           # expect version: 0.2.0
+
+sudo /usr/sbin/installer -pkg /var/db/homeparentcontrol/pkgs/0.1.0.pkg -target /
+pkgutil --pkg-info com.hpc.agent           # ← THE QUESTION. 0.1.0, or refused?
+```
+
+**Pass:** `pkgutil` reports 0.1.0, and `/usr/local/libexec/hpc-enforcerd` is
+the older binary. Record it in the milestone and the rollback design stands.
+
+**Fail** — `installer` refuses the downgrade, or reports success and leaves
+the newer files: **stop and say so.** Do not work around it locally. The
+options then are a versioned-directory layout with a symlink swap (which E.2
+simplified away), or `--dominion`-style forced install, and choosing between
+those is an ADR, not a patch.
+
+### Then the supervisor's own rollback, unattended and offline
+
+```sh
+# Running 0.2.0, with 0.1.0 cached as last-good.
+sudo /usr/sbin/installer -pkg /var/db/homeparentcontrol/pkgs/0.2.0.pkg -target /
+echo 0.1.0 | sudo tee /var/db/homeparentcontrol/last_good
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.hpc.supervisor.plist
+
+# ⚠️ Pull the network FIRST. §6.4's claim is "No network", and a rollback
+# that quietly downloads is not the thing being tested.
+sudo ifconfig en0 down
+
+# Break the enforcer so the supervisor sees a stale heartbeat.
+sudo launchctl bootout system/com.hpc.enforcerd
+sudo rm -f /var/db/homeparentcontrol/enforcer.health
+
+# The supervisor needs `staleConfirmations` (2) ticks past its cooldown.
+# ⚠️ The cooldown is 10 MINUTES from boot, deliberately — without it every
+# reboot would be a rollback. Wait it out; this is not hung.
+sleep 720
+tail -f /var/log/homeparentcontrol/supervisor.log
+```
+
+**Pass:** `pkgutil --pkg-info com.hpc.agent` reports 0.1.0, `quarantine.json`
+contains `0.2.0`, and the spool has `supervisor.rollback` — all with `en0`
+down.
+
+**Fail modes worth distinguishing:**
+
+- *Nothing happens for 20 minutes* — check `supervisor.deferred`'s reason.
+  `unhealthy_but_in_cooldown` means keep waiting;
+  `unhealthy_no_rollback_target` means `last_good` names a version that is
+  not in `pkgs/`.
+- *It rolls back repeatedly* — the cooldown is not holding. That is the loop
+  `SupervisorPolicyTests.cooldownStopsTheRollbackLoop` exists to prevent, so
+  it would mean the daemon is not carrying state across ticks.
+- *It rolls back and then installs 0.2.0 again* — quarantine is not being
+  read. This is the infinite install/crash/rollback loop; treat it as
+  release-blocking.
+
+⚠️ **Restore the network and reinstall the current version afterwards.** A
+machine left on a quarantined old build will not accept the new one.
+
+---
+
 ## What is already proven without you
 
 These ran in CI and locally, and need no hardware:

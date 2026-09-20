@@ -79,7 +79,9 @@ for test_name in \
   "policyVerifies" \
   "eventsAreIdempotent" \
   "rotates" \
-  "badCredentialHaltsSyncOnly"
+  "badCredentialHaltsSyncOnly" \
+  "drainsAfterAnOutage" \
+  "unreachableIsNotAnAction"
 do
   if [ "$FIRST" -eq 0 ]; then sleep "$PACE"; fi
   FIRST=0
@@ -91,7 +93,7 @@ do
   # ⚠️ Capture once. Re-running the test to print its failure would enrol a
   # SECOND time with a now-consumed code, and every failure would report
   # `enrolment-code-consumed` instead of what actually went wrong.
-  OUTPUT="$(swift test --package-path agent --filter "EndToEndTests/$test_name" 2>&1 || true)"
+  OUTPUT="$(swift test --package-path agent --filter "EndToEnd.*Tests/$test_name" 2>&1 || true)"
   if printf '%s' "$OUTPUT" | grep -q "Test run with .* passed"; then
     echo "   PASS  $test_name"
   else

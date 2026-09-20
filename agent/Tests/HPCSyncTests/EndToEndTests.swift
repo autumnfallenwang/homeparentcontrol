@@ -224,3 +224,113 @@ struct EndToEndTests {
         }
     }
 }
+
+/// The outage exit criterion, against a real server rather than a fake one.
+///
+/// *Survives a server outage of several hours and drains its queue without
+/// duplicating or losing events.* `QueueTests.survivesAnOutage` proves the
+/// store does it; this proves the whole path does, including the wire.
+///
+/// The outage is simulated by pointing the client at a closed port — which is
+/// what a cable out, a scaled-to-zero deployment and a blackholed DNS all
+/// look like from here.
+struct OutageEndToEndTests {
+
+    static var enabled: Bool { EndToEndTests.enabled }
+
+    /// A port with nothing listening. Connection refused, immediately.
+    static let deadURL = URL(string: "http://127.0.0.1:9/api/agent/v1/")!
+
+    @Test("★ events queued through an outage all arrive, exactly once",
+          .enabled(if: enabled))
+    func drainsAfterAnOutage() throws {
+        let (liveClient, identity) = try EndToEndTests.enrolled()
+        let queue = try Queue(path: EndToEndTests.scratch("outage") + ".sqlite")
+        SyncDaemon.queue = queue
+
+        // ── The outage. 240 ticks' worth of enforcement events pile up while
+        // every flush fails. The agent must keep accepting them: a queue that
+        // stopped taking writes would push back into the enforcer's spool,
+        // and the spool is on the enforcer's critical path.
+        let dead = Client(config: .init(baseURL: Self.deadURL, token: liveClient.config.token))
+        let start = Date().addingTimeInterval(-4 * 3_600)
+        var minted: Set<String> = []
+
+        for tick in 0..<240 {
+            let at = start.addingTimeInterval(Double(tick) * 60)
+            let rows = [
+                Queue.Row(
+                    eventId: EventID.derived(from: "outage-\(tick)", at: at), ts: at,
+                    type: "enforcement.action_taken", cls: .audit, seq: tick,
+                    data: ["action": "lock", "tick": tick])
+            ]
+            minted.formUnion(rows.map(\.eventId))
+            try queue.enqueue(rows)
+
+            // Every tenth tick, try to flush. All of them must fail.
+            if tick % 10 == 0 {
+                #expect(throws: (any Error).self) {
+                    try dead.events(SyncDaemon.eventsBody(rows, identity: identity))
+                }
+            }
+        }
+        #expect(try queue.census().auditCount == 240, "the outage lost events before the wire")
+
+        // ── The server comes back. Drain in the agent's own batch size.
+        var delivered: Set<String> = []
+        var rounds = 0
+        while rounds < 20 {
+            rounds += 1
+            let batch = try queue.batch(limit: 100)
+            if batch.isEmpty { break }
+            let response = try liveClient.events(
+                SyncDaemon.eventsBody(batch, identity: identity))
+            let accepted = response["accepted_event_ids"] as? [String] ?? []
+            #expect(
+                accepted.count == batch.count,
+                "the server accepted fewer ids than were sent; the queue would never drain")
+            delivered.formUnion(accepted)
+            try queue.acknowledge(accepted)
+        }
+
+        #expect(try queue.census().totalCount == 0, "the queue did not drain")
+        #expect(delivered == minted, "events were lost or invented across the outage")
+
+        // ── ★ And a replay after the drain is still accepted, not rejected.
+        // §5.7: "a conflicting row is still ACCEPTED — it is already durable.
+        // Returning only newly-inserted rows would make the agent retry the
+        // same batch forever."
+        let replay = [
+            Queue.Row(
+                eventId: EventID.derived(from: "outage-0", at: start), ts: start,
+                type: "enforcement.action_taken", cls: .audit, seq: 0,
+                data: ["action": "lock", "tick": 0])
+        ]
+        let response = try liveClient.events(
+            SyncDaemon.eventsBody(replay, identity: identity))
+        #expect((response["accepted_event_ids"] as? [String] ?? []).count == 1)
+    }
+
+    /// ★ An unreachable server must not look like a rejected credential. The
+    /// two produce completely different agent behaviour — backoff versus
+    /// halt — and confusing them is how a network blip becomes a permanent
+    /// stop.
+    @Test("★ unreachable is a transport failure, never an hpc_action",
+          .enabled(if: enabled))
+    func unreachableIsNotAnAction() throws {
+        let dead = Client(config: .init(baseURL: Self.deadURL, token: "hpc_dk_whatever"))
+        let queue = try Queue(path: EndToEndTests.scratch("unreachable") + ".sqlite")
+        SyncDaemon.queue = queue
+        let identity = DeviceState.Identity(
+            deviceId: "018f2a4c-7b31-7c9e-9d2a-3f5b7c1e4a60", hardwareUUID: "E2E")
+
+        do {
+            _ = try dead.sync(SyncDaemon.syncBody(queue, identity: identity))
+            Issue.record("a closed port returned a response")
+        } catch is Client.Problem {
+            Issue.record("unreachable was classified as a protocol problem")
+        } catch {
+            #expect(error is Client.Transport)
+        }
+    }
+}
