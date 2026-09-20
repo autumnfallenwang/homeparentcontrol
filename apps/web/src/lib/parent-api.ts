@@ -34,6 +34,15 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     cache: "no-store",
   });
   if (response.status === 204) return undefined as T;
+
+  // ⚠️ A 401 means the session expired, and every page in this app needs
+  // one. Handled here rather than in eight `catch` blocks, because the one
+  // that gets forgotten shows a parent "Request failed (401)" on the page
+  // they opened to settle an argument.
+  if (response.status === 401 && typeof window !== "undefined") {
+    window.location.href = "/sign-in";
+  }
+
   const body = (await response.json().catch(() => null)) as {
     error?: string;
     reason?: string;

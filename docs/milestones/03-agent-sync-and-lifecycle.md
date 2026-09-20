@@ -1,6 +1,6 @@
 ---
 name: 03-agent-sync-and-lifecycle
-status: open
+status: awaiting-verification
 opened: 2026-09-18
 ---
 
@@ -150,3 +150,7 @@ Parent UI (04) · cluster (05) · real shutdown (06).
   (`ps %cpu` is a decaying average here, not Linux's lifetime one). New verifications: **V-SAMPLE-1**
   (do `lsappinfo` and the session probe work through `launchctl asuser` from root?) and
   **V-SAMPLE-2** (does `systemUptime` stop during sleep?). Neither can touch enforcement.
+- 2026-09-20: **`awaiting-verification`.** No code left. What remains is V5, V6, V9,
+  V-PKG-1 (which gates the supervisor's rollback criterion), V-SAMPLE-1 and V-SAMPLE-2 —
+  all human observations, all scripted in
+  [`../../agent/scripts/v-series.md`](../../agent/scripts/v-series.md).

@@ -1,6 +1,6 @@
 ---
 name: 02-agent-enforcement-offline
-status: open
+status: awaiting-verification
 opened: 2026-09-18
 ---
 
@@ -111,3 +111,6 @@ shutdown on the Mac mini (06)**.
   converse: "already warned at T-30" surviving into the next night and suppressing it.
 - 2026-09-18: Opened. Warnings and `CFUserNotification` with a masked text field are already proven
   on this hardware, including from a root daemon via the `asuser` bridge.
+- 2026-09-20: **`awaiting-verification`.** No code left. The one remaining criterion (V1–V4,
+  V7, V8) needs sudo and a Mac willing to be locked; the procedure is in
+  [`../../agent/scripts/v-series.md`](../../agent/scripts/v-series.md).

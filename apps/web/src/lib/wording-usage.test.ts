@@ -133,3 +133,58 @@ describe("what must not exist anywhere in the UI", () => {
     }
   });
 });
+
+/**
+ * ★ P2.6 — "there is no mobile app and never will be."
+ *
+ * Every parent surface is this app in a browser, and the page that settles
+ * an argument is opened on a phone while someone waits. Two things break
+ * that, both silently:
+ *
+ * - **No viewport tag.** iOS renders at 980px and scales down, which makes a
+ *   44px button about 15px tall. The page still "works"; it is just
+ *   unusable one-handed.
+ * - **Touch targets under 44px.** 📄 Apple's HIG minimum. Below it, the
+ *   grant buttons get mis-tapped, and a mis-tap here grants the wrong
+ *   amount of time.
+ */
+/** One top-level declaration, from its `export` to the next one. */
+function declaration(source: string | undefined, start: string): string {
+  if (!source) return "";
+  const from = source.indexOf(start);
+  if (from < 0) return "";
+  const rest = source.slice(from + start.length);
+  const next = rest.indexOf("\nexport ");
+  return start + (next < 0 ? rest : rest.slice(0, next));
+}
+
+describe("phone width", () => {
+  const layout = files.find((file) => file.path.endsWith("app/layout.tsx"));
+  const ui = files.find((file) => file.path.endsWith("components/ui.tsx"));
+
+  it("★ the root layout declares a viewport", () => {
+    expect(layout?.code).toContain("export const viewport");
+    expect(layout?.code).toContain('width: "device-width"');
+  });
+
+  it("★ every interactive control is at least 44px tall", () => {
+    // min-h-11 is 11 × 0.25rem = 2.75rem = 44px.
+    expect(ui?.code).toContain("min-h-11");
+    // ⚠️ Slice to the NEXT top-level export, not to the first `\n}` — a
+    // destructured parameter list closes with a brace at column 0, so the
+    // obvious regex matched only the signature and the assertion passed on
+    // whatever came next. (It failed honestly here, which is how this was
+    // found.)
+    expect(declaration(ui?.code, "export function Button")).toContain("min-h-11");
+    expect(declaration(ui?.code, "export const inputClass")).toContain("min-h-11");
+  });
+
+  it("★ no page is laid out for a desktop-only width", () => {
+    for (const file of files.filter((item) => item.path.includes("app/"))) {
+      // A fixed pixel width, or a grid that is multi-column at every size,
+      // is what breaks below 400px.
+      expect(/\bw-\[\d{3,}px\]/.test(file.code), file.path).toBe(false);
+      expect(/className="[^"]*\bgrid-cols-[3-9]\b/.test(file.code), file.path).toBe(false);
+    }
+  });
+});

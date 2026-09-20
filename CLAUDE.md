@@ -34,10 +34,16 @@ on the child's Mac.
 
 This project uses **milestone-driven** development:
 
-- **One milestone at a time.** Milestones live in `docs/milestones/NN-*.md`. The full roadmap is written
-  up front: `status: planned` → `open` → `done`, and **exactly one file is `open`**. The active
-  milestone is the lowest-numbered `open` file — it holds the current scope, exit criteria and progress
-  notes. Milestone 01 is active; 02–06 are planned.
+- **One milestone at a time.** Milestones live in `docs/milestones/NN-*.md`. The full roadmap is
+  written up front: `status: planned` → `open` → `awaiting-verification` → `done`, and **exactly one
+  file is `open`**. The active milestone is the lowest-numbered `open` file — it holds the current
+  scope, exit criteria and progress notes.
+  - ⚠️ **`awaiting-verification` was added in milestone 04**, because M2 and M3 were both `open` at
+    once and neither had any code left to write. Everything checkable without root was checked;
+    what remained needed a Mac someone was willing to have locked. Leaving them `open` made the
+    one-file rule meaningless and hid which milestone was actually being worked on. A milestone is
+    `awaiting-verification` when its code is complete and its remaining exit criteria are *observations*
+    a person has to make — and the file must say exactly which, with a procedure.
 - **Plan before code.** `/devkit-task`'s Phase 3 plan-approval gate is non-negotiable, even for one-line fixes. The plan loop catches misunderstandings before they cost real time.
 - **Verify before claiming done.** `/devkit-task` runs lint → typecheck → test before reporting success. Retry up to 3x on failure, then surface.
 - **Architecture changes need an ADR.** If a significant decision was made (lib choice, boundary move, approach pivot), write a new `docs/adr/NNNN-*.md` from `docs/adr/0000-template.md`.

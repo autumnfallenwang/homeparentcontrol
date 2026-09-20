@@ -13,8 +13,11 @@ Append progress notes to the active milestone file under `docs/milestones/`. Opt
 
    > **Local convention, differs from stock devkit.** This project planned its full roadmap up front, so
    > `docs/milestones/` holds several files at once. `status: planned` means written but not started;
-   > `status: open` means in progress; `status: done` means shipped. Exactly one file should be `open`.
+   > `status: open` means in progress; `status: awaiting-verification` means the code is complete and
+   > only human observations remain (hardware runs, sudo, a Mac willing to be locked); `status: done`
+   > means shipped and verified. Exactly one file should be `open`.
    > The stock rule (highest-numbered non-`done`) would select the *last* milestone here, which is wrong.
+   > ⚠️ `awaiting-verification` is NOT `done`. Do not tick an exit criterion nobody has observed.
 3. If no milestone files exist, do nothing. Report: "no active milestone — nothing to update."
 
 ## Append a progress note
