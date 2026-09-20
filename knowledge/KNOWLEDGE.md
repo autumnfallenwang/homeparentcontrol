@@ -56,3 +56,4 @@ The skill picks a slug, writes the file with the right frontmatter, and updates 
 | [better-auth-apikey-plugin](./better-auth-apikey-plugin.md) | `feedback` | `enableMetadata` is off by default, and the rate-limit throw carries **no** HTTP status |
 | [read-every-generated-baseline](./read-every-generated-baseline.md) | `feedback` | An unread golden/snapshot baseline enshrines the bug — read the values, not the test summary |
 | [failure-counters-outlive-rollback](./failure-counters-outlive-rollback.md) | `feedback` | A failure counter written inside the transaction the failure rolls back is decoration |
+| [acknowledge-what-is-durable](./acknowledge-what-is-durable.md) | `feedback` | Ack everything now durable, not just what this call wrote — else the sender retries forever |

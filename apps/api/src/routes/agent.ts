@@ -5,6 +5,7 @@ import { db } from "../db/index.js";
 import { devices, policyVersions } from "../db/schema.js";
 import { agentOnError, ProblemError } from "../lib/problem.js";
 import { type AuthVariables, requireAgentAuth } from "../middleware/auth.js";
+import { handleEvents } from "./events.js";
 import { handleSync } from "./sync.js";
 
 /**
@@ -18,7 +19,7 @@ import { handleSync } from "./sync.js";
  *
  * `POST /enroll` mounts OUTSIDE this instance entirely — see routes/enroll.ts.
  */
-type AgentVariables = AuthVariables & { deviceId: string };
+type AgentVariables = AuthVariables & { deviceId: string; householdId: string };
 
 export const agentApp = new Hono<{ Variables: AgentVariables }>();
 
@@ -40,27 +41,47 @@ agentApp.use("*", requireAgentAuth);
  * X1b. `policy.integration.test.ts` pins the equivalence so the break shows up
  * in CI rather than in production.
  */
-export const requireDevice = createMiddleware<{ Variables: AgentVariables }>(async (c, next) => {
-  const session = c.get("session") as { id?: string } | undefined;
-  if (!session?.id) throw new ProblemError("unauthorized");
+function deviceResolver(opts: { allowDecommissioned: boolean }) {
+  return createMiddleware<{ Variables: AgentVariables }>(async (c, next) => {
+    const session = c.get("session") as { id?: string } | undefined;
+    if (!session?.id) throw new ProblemError("unauthorized");
 
-  const [device] = await db
-    .select({ id: devices.id, status: devices.status })
-    .from(devices)
-    .where(eq(devices.apiKeyId, session.id));
+    const [device] = await db
+      .select({ id: devices.id, householdId: devices.householdId, status: devices.status })
+      .from(devices)
+      .where(eq(devices.apiKeyId, session.id));
 
-  if (!device) throw new ProblemError("scopeViolation", "this credential is not bound to a device");
-  if (device.status === "decommissioned") {
-    // ⚠️ The ONE place `decommission` is legitimate: authenticated, and set by
-    // a parent. Never inferred from a status code.
-    throw new ProblemError("deviceRevoked", "this device was decommissioned", {
-      action: "decommission",
-    });
-  }
+    if (!device) {
+      throw new ProblemError("scopeViolation", "this credential is not bound to a device");
+    }
+    if (device.status === "decommissioned" && !opts.allowDecommissioned) {
+      // ⚠️ The ONE place `decommission` is legitimate: authenticated, and set
+      // by a parent. Never inferred from a status code.
+      throw new ProblemError("deviceRevoked", "this device was decommissioned", {
+        action: "decommission",
+      });
+    }
 
-  c.set("deviceId", device.id);
-  return next();
-});
+    c.set("deviceId", device.id);
+    c.set("householdId", device.householdId);
+    return next();
+  });
+}
+
+/** Nothing should hand a decommissioned device new policy or new work. */
+export const requireDevice = deviceResolver({ allowDecommissioned: false });
+
+/**
+ * ⚠️ `/events` alone accepts a decommissioned device.
+ *
+ * Decommissioning asks the agent to emit a final `agent.decommissioned` audit
+ * event — which the strict resolver would refuse, since the device is already
+ * decommissioned by then. §5.5 is explicit that decommissioning retains **all
+ * telemetry**: "the child's history is not the device's property". Telemetry
+ * is write-only, so accepting it costs nothing and preserves the one record
+ * that documents the decommission.
+ */
+export const requireDeviceForTelemetry = deviceResolver({ allowDecommissioned: true });
 
 /**
  * Credential introspection. Answers "is this key valid, and who is it?" — the
@@ -130,3 +151,14 @@ agentApp.get("/policy", requireDevice, async (c) => {
  * lives in `sync.ts`; this file stays a routing table.
  */
 agentApp.post("/sync", requireDevice, handleSync);
+
+/**
+ * `POST /api/agent/v1/events` — telemetry (§4.4).
+ *
+ * ⚠️ A.27 keeps this OFF the tick: "a 413 / 429 / poisoned batch must never
+ * make a live agent look silent." The converse follows and the spec never
+ * states it — this endpoint must not write `last_sync_at` either, or a device
+ * whose sync daemon is dead but whose queue is still draining would look
+ * healthy. The handler asserts nothing about liveness; the test asserts that.
+ */
+agentApp.post("/events", requireDeviceForTelemetry, handleEvents);

@@ -151,6 +151,36 @@ Argo CD, Loki, alerting). The 11 cluster verifications stay blocked until k3s is
   Loki-specific code**; **C6 ❌ there is no alerting in the cluster at all** — no rules, no contact
   points, no notifiers, and the three live apps have none either. Recorded in
   [[arch-cluster-access]] and reflected in milestone 05.
+- 2026-09-20: **Phase 2 step 4c shipped — `POST /events`. STEP 4 IS COMPLETE.** All five endpoints
+  exist. Only step 5 (projection, rollups, prune) stands between here and milestone 01.
+- 2026-09-20: **The accepted-ids trap, avoided and then proven avoided.** `ON CONFLICT DO NOTHING
+  RETURNING` yields only newly-inserted rows, so the implementation that falls out of the SQL is the
+  wrong one — and §5.7 is explicit that "a conflicting row is still *accepted*… returning only
+  newly-inserted rows would make the agent retry the same batch forever". That failure is silent:
+  the agent re-sends, the server accepts, nothing errors, the queue never drains. Falsified per
+  [[falsify-the-gate]] — regressing `accepted_event_ids` to `RETURNING`'s output makes the guard
+  return `[]` on the second send, exactly the retry-forever shape.
+- 2026-09-20: **Added an optional per-event `boot_id`** (additive, R2-safe). `(boot_id, seq)` is the
+  only clock-independent ordering key, but the spec puts `boot_id` on the *batch* while the agent's
+  queue is durable across reboots — so a post-reboot drain would stamp pre-reboot events with the
+  current boot and corrupt the ordering of exactly the events a crash investigation wants. The Swift
+  agent does not exist yet, which made this the cheapest moment the fix will ever be available.
+- 2026-09-20: **`/events` alone accepts a decommissioned device.** Decommissioning asks the agent for
+  a final `agent.decommissioned` audit event, which the strict resolver would have refused — the code
+  path rejecting the record of its own action. §5.5 retains **all** telemetry ("the child's history
+  is not the device's property"), so `requireDevice` became a two-policy factory: `/sync` and
+  `/policy` still refuse, telemetry does not.
+- 2026-09-20: **`class` is the one narrow exception to R8's never-reject.** An unknown `type` is
+  stored verbatim and counted; an unknown `class` is rejected, because the retention ladder is keyed
+  on it (sample 90 d, audit 400 d) and anything else creates rows the pruner will never touch.
+- 2026-09-20: **Gave `unknown_event_type` something to mean.** The spec names the counter and never
+  says what "unknown" is measured against. It is now a prefix list mirroring `telemetry.collect`'s
+  globs — it does **not** gate ingest, it answers "is the agent sending something we have no
+  projection for yet", which is what makes a future backfill discoverable. Both counters ride the
+  pino line, since C2 confirmed there is no Prometheus anywhere in the cluster.
+- 2026-09-20: ⚠️ **`/events` must not look like a heartbeat.** A.27 says a poisoned batch must never
+  make a live agent look silent; the converse is never stated but follows — a draining queue must not
+  make a *dead* agent look alive. Asserted, same as `GET /policy`.
 - 2026-09-20: **Phase 2 step 4b shipped — `POST /sync` and `GET /api/agent/v1/health`.** The tick
   works end to end: first tick flips `enrolled → active` and returns the full signed policy, second
   tick with a matching ETag returns `unchanged: true` with no payload. **`/events` is all that

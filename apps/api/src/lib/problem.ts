@@ -66,6 +66,7 @@ export const PROBLEMS = {
   scopeViolation: { slug: "scope-violation", status: 403, title: "Out of scope for this device" },
   policyNotFound: { slug: "policy-not-found", status: 404, title: "No policy compiled yet" },
   malformed: { slug: "malformed-request", status: 400, title: "Malformed request" },
+  payloadTooLarge: { slug: "batch-too-large", status: 413, title: "Batch too large" },
   rateLimited: { slug: "rate-limited", status: 429, title: "Too many requests" },
   internal: { slug: "internal-error", status: 500, title: "Internal error" },
 } as const;
