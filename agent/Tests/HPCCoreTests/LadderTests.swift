@@ -34,6 +34,13 @@ struct LadderTests {
     static func hasLock(_ d: Ladder.Decision) -> Bool { d.effects.contains(.lock) }
     static func hasShutdown(_ d: Ladder.Decision) -> Bool { d.effects.contains(.shutdown) }
 
+    static func hasAudit(_ d: Ladder.Decision, _ kind: String) -> Bool {
+        d.effects.contains { effect in
+            if case .audit(let k, _) = effect { return k == kind }
+            return false
+        }
+    }
+
     // MARK: - The lock is unconditional
 
     @Test("entering the window locks")
@@ -74,7 +81,7 @@ struct LadderTests {
             now: Self.t0,
             previousWarning: (leadMinutes: 5, outcome: .failed))
         #expect(Self.hasLock(d))
-        #expect(d.effects.contains { if case .audit(let k, _) = $0 { return k == "enforcement.warning_failed" } else { return false } })
+        #expect(Self.hasAudit(d, "enforcement.warning_failed"))
     }
 
     /// ★ X10 again — "no console user logged in is not a skip, it is a no-op".
@@ -87,7 +94,7 @@ struct LadderTests {
             previousWarning: (leadMinutes: 5, outcome: .noConsoleUser))
         #expect(Self.hasLock(d))
         // And it is NOT reported as a failure — there was nothing to warn.
-        #expect(!d.effects.contains { if case .audit(let k, _) = $0 { return k == "enforcement.warning_failed" } else { return false } })
+        #expect(!Self.hasAudit(d, "enforcement.warning_failed"))
     }
 
     /// ★ X9 — the breaker holds the rung; it never stops enforcing.

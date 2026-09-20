@@ -23,12 +23,11 @@ Tick loop · policy load with JWS verification and last-known-good fallback · t
 
 ## Exit criteria
 
-- [ ] **V1–V9 all pass** (§8.4) — ⚠️ **needs the owner: sudo, a LaunchDaemon, and a Mac you are
-      willing to have locked.** Scripted in `agent/scripts/v-series.md` with a signed test-policy
-      generator. V1–V4, V7 and V8 are runnable today; see the scope note below for V5, V6 and V9.
-- [ ] **V6 produces byte-identical enforcer logs** with and without sync running — ⚠️ **unrunnable
-      in this milestone**, see below
-- [ ] **V5 proves total sync timeout < one tick** — ⚠️ **unrunnable in this milestone**, see below
+- [ ] **V1–V4, V7, V8 pass** (§8.4) — ⚠️ **needs the owner: sudo, a LaunchDaemon, and a Mac you are
+      willing to have locked.** Scripted in `agent/scripts/v-series.md`, with a signed test-policy
+      generator that opens a window two minutes out. Roughly 30 minutes.
+- ➡️ **V5, V6 and V9 moved to milestone 03** on 2026-09-20 — they test the enforcer against the sync
+      daemon and the deadfall, which this milestone's own scope defers. See `03-agent-sync-and-lifecycle.md`.
 - [x] `otool -L` shows **no networking symbols** in the enforcer binary — `scripts/check-no-networking.sh`,
       run in CI. ⚠️ Falsified: a *dead* `import Network` passes (Swift does not link an unused
       framework), one real `NWPathMonitor()` fails it. So it proves no network **capability**, which

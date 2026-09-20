@@ -1,6 +1,6 @@
 ---
 name: 03-agent-sync-and-lifecycle
-status: planned
+status: open
 opened: 2026-09-18
 ---
 
@@ -27,7 +27,18 @@ clause in its predicate.
       credential
 - [ ] Survives a server outage of several hours and drains its queue without duplicating or losing
       events (idempotency by `event_id`)
-- [ ] **Enforcement is provably unaffected throughout** — re-run V6 with sync present
+- [ ] **Enforcement is provably unaffected throughout** — V6, moved here from milestone 02
+
+### Inherited from milestone 02 (moved 2026-09-20)
+
+These three test the enforcer's *interaction* with components milestone 02 explicitly deferred, so
+they could never have passed there. V6 in particular was M02's headline and had nothing to boot out.
+
+- [ ] **V5** — server accepts then hangs 120 s → locks at the boundary, **proving total sync timeout
+      < one tick**. Needs the sync daemon.
+- [ ] **V6** — `launchctl bootout system/com.hpc.sync` → **byte-identical enforcer logs** with and
+      without sync running. *The direct proof* that enforcement is independent of the network.
+- [ ] **V9** — `sudo kill -9` the enforcer with the deadfall installed → the deadfall re-locks.
 - [ ] Credential rotation completes with the 24 h server-side overlap
 - [ ] Supervisor installs a new version, and rolls back from the pkg cache with no network
 - [ ] Heartbeat drives the five-state machine correctly, including `EXPECTED_OFFLINE` on clean
@@ -57,3 +68,6 @@ Parent UI (04) · cluster (05) · real shutdown (06).
 ## Progress
 
 - 2026-09-18: Opened.
+- 2026-09-20: **Took V5, V6 and V9 from milestone 02.** They test the enforcer against the sync
+  daemon and the deadfall, both of which M02's scope defers to here — V6 is M02's headline exit
+  criterion and there was nothing to `launchctl bootout` until a sync daemon existed.
