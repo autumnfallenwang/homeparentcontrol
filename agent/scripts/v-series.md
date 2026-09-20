@@ -413,6 +413,76 @@ reporting gap, not an over-count.
 
 ---
 
+## V-SHADOW-1 — does shadow mode actually not enforce, and then actually enforce?
+
+⚠️ **The only deliberate non-enforcing path in the project.** Its pure logic
+has 17 tests and its marker has 12, but the 20 lines that wire it into the
+enforcer's tick cannot be exercised without root — and those 20 lines are
+the ones that decide whether a Mac locks tonight.
+
+Two halves, and **the second matters more than the first**. A shadow that
+does not enforce is the feature; a shadow that never *stops* is a Mac that
+silently never locks again, and it looks identical to everything working.
+
+```sh
+# ── Half 1: it does NOT enforce while soaking.
+sudo agent/scripts/make-test-policy.sh          # window opens in ~2 minutes
+
+# Enter shadow by hand, the way the supervisor would.
+VERSION=$(/usr/local/libexec/hpc-enforcerd --version 2>/dev/null \
+          || sed -n 's/.*version = "\(.*\)"/\1/p' agent/Sources/HPCEnforcer/main.swift | head -1)
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+DEADLINE=$(date -u -v+1H +%Y-%m-%dT%H:%M:%SZ)
+printf '{"version":"%s","started_at":"%s","deadline":"%s"}\n' "$VERSION" "$NOW" "$DEADLINE" \
+  | sudo tee /var/db/homeparentcontrol/soak.json
+
+sudo launchctl kickstart -k system/com.hpc.enforcerd
+sleep 240                                        # through the boundary
+```
+
+**Pass:** the screen does **not** lock, and the spool carries
+`enforcement.shadow_decision` with `would` containing `lock`. stderr in
+`/var/log/hpc-enforcerd.log` says `NOT ENFORCING: shadow mode until …` every
+tick.
+
+**Fail:** it locks anyway (the wiring is wrong, or the marker was rejected —
+check the version string matches exactly), or there are no shadow decisions
+(it is not in shadow at all, which the log line will say).
+
+```sh
+# ── Half 2: ★ it DOES enforce once the deadline passes.
+DEADLINE=$(date -u -v-1M +%Y-%m-%dT%H:%M:%SZ)    # already expired
+printf '{"version":"%s","started_at":"%s","deadline":"%s"}\n' "$VERSION" "$NOW" "$DEADLINE" \
+  | sudo tee /var/db/homeparentcontrol/soak.json
+sudo agent/scripts/make-test-policy.sh
+sleep 240
+```
+
+**Pass:** it locks, normally, and no shadow decisions appear.
+
+### And the three tamper cases
+
+Each should lock. They are the properties that keep this from being lever #1
+([[enforcement-invariant]]) — a runtime "do not enforce" switch on a machine
+where the child has admin.
+
+```sh
+# Wrong version — a stale marker, or a rollback to an already-soaked build.
+printf '{"version":"9.9.9","started_at":"%s","deadline":"%s"}\n' "$NOW" "$DEADLINE_FUTURE" | sudo tee …
+# A hand-edited year-long deadline.
+printf '{"version":"%s","started_at":"%s","deadline":"2027-01-01T00:00:00Z"}\n' "$VERSION" "$NOW" | sudo tee …
+# Corrupt.
+echo 'not json' | sudo tee /var/db/homeparentcontrol/soak.json
+```
+
+⚠️ **Remove the marker when you are done**, or the next run soaks:
+
+```sh
+sudo rm -f /var/db/homeparentcontrol/soak.json
+```
+
+---
+
 ## What is already proven without you
 
 These ran in CI and locally, and need no hardware:
@@ -444,6 +514,12 @@ These ran in CI and locally, and need no hardware:
   interval spent idle reports zero `active_s`, and that a locked screen is
   credited to nothing — 19 tests, plus 7 live probes against this Mac's real
   `lsappinfo`, `ioreg` and window-server session.
+- **Shadow mode's judgement** — 17 tests, including an exhaustive sweep
+  proving the window can never outlive its maximum under any input, and that
+  a soak which can never promote still ends at its deadline.
+- **The soak marker**, 12 tests: every unreadable, truncated, wrong-shaped,
+  wrong-versioned or hand-edited state resolves to ENFORCING, with a control
+  test proving a well-formed one really does shadow.
 - **Swift→TypeScript interop for telemetry**: the sampler's output is
   committed as a fixture, the Swift suite fails if the emitter drifts from
   it, and the TypeScript suite fails if it stops satisfying the projector.

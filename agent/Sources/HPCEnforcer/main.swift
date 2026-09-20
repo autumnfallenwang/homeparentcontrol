@@ -96,6 +96,49 @@ enum Enforcer {
         ladderState = step.state
         pendingWarning = nil
 
+        // ── 7a. ⚠️ **SHADOW MODE — the one branch that does not act** (§6.5).
+        //
+        // A newly installed version runs the full loop and computes every
+        // decision it would make, applying none of them. The decision above
+        // is already computed; this only decides whether to carry it out.
+        //
+        // ⚠️ The verdict is taken AFTER the ladder, deliberately. Shadow must
+        // exercise exactly the same code path as enforcement — a shadow that
+        // short-circuits earlier is testing a different program than the one
+        // that will run tomorrow, which makes the soak worthless.
+        //
+        // Every ambiguity in `ShadowMode.verdict` resolves to `.enforcing`,
+        // and the window has a hard deadline that criteria can only shorten.
+        // See `ShadowMode`'s header for the four properties.
+        let shadow = ShadowMode.verdict(
+            soak: SoakMarker.read(), runningVersion: version, now: Date())
+        if case .shadowing(let until, let shadowVersion) = shadow {
+            let would = step.effects.compactMap { effect -> String? in
+                switch effect {
+                case .lock: return "lock"
+                case .shutdown: return "shutdown"
+                case .deliverWarning(let lead, _, _): return "warn_\(lead)"
+                case .audit: return nil
+                }
+            }
+            Spool.append(
+                kind: "enforcement.shadow_decision",
+                detail: ShadowMode.shadowDecision(
+                    would: would, windowId: evaluation.activeWindow?.id,
+                    version: shadowVersion, deadline: until
+                ).mapValues { String(describing: $0) },
+                tickSeq: tickSeq)
+            Spool.writeHealth(
+                tickSeq: tickSeq, lastDecision: "shadow", version: version)
+            // ⚠️ LOUD, every tick, exactly like the fail-open branches above.
+            // §4.6: "fail-open is not fail-silent, and the entire argument
+            // depends on that distinction holding." A silent soak is a Mac
+            // that quietly stopped locking.
+            FileHandle.standardError.write(
+                Data("NOT ENFORCING: shadow mode until \(until) (\(shadowVersion))\n".utf8))
+            return
+        }
+
         for effect in step.effects {
             switch effect {
             case .deliverWarning(let lead, let channel, _):

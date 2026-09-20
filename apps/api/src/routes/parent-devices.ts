@@ -13,6 +13,7 @@ import {
   tripwires,
 } from "../db/schema.js";
 import { log } from "../lib/logger.js";
+import { soakReport } from "../lib/soak.js";
 import { fail, type ParentVariables } from "./parent-context.js";
 
 /**
@@ -217,6 +218,29 @@ export async function handleDevice(c: Context<{ Variables: ParentVariables }>) {
     })),
     desired: pending,
   });
+}
+
+/**
+ * `GET /api/parent/v1/devices/:id/soak` — §6.5's shadow-mode soak.
+ *
+ * ⚠️ **Read-only and advisory.** Nothing here can extend a soak: the agent's
+ * deadline is baked into its own marker at install and the server cannot
+ * move it. A broken report can only fail to promote early, and the deadline
+ * still ends the soak — which is the direction Invariant E requires.
+ */
+export async function handleSoak(c: Context<{ Variables: ParentVariables }>) {
+  const householdId = c.get("householdId");
+  const deviceId = c.req.param("id");
+  if (!deviceId) return fail(c, 400, "missing device id");
+
+  const [device] = await db
+    .select({ id: devices.id })
+    .from(devices)
+    .where(and(eq(devices.id, deviceId), eq(devices.householdId, householdId)))
+    .limit(1);
+  if (!device) return fail(c, 404, "no such device");
+
+  return c.json(await soakReport(deviceId));
 }
 
 // ── Away until (X6 / A.19)

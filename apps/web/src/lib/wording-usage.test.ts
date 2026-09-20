@@ -72,6 +72,10 @@ const FORBIDDEN_LITERALS: { fragment: string; why: string }[] = [
     fragment: "not minutes it was switched on",
     why: "§5.8's active_s label — import ACTIVE_TIME_EXPLANATION",
   },
+  {
+    fragment: "is NOT enforcing bedtime",
+    why: "§6.5's shadow-mode line — import shadowModeNotEnforcing",
+  },
 ];
 
 describe("the four load-bearing wordings", () => {
@@ -103,6 +107,10 @@ describe("the four load-bearing wordings", () => {
     const device = files.find((file) => file.path.includes("devices"));
     expect(device?.text).toContain("REVOKE");
     expect(device?.text).toContain("DECOMMISSION");
+
+    // ★ §6.5 — the card must actually render the shadow line, not merely
+    // avoid hardcoding it.
+    expect(card?.text).toContain("shadowModeNotEnforcing");
   });
 });
 

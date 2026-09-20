@@ -44,6 +44,12 @@ public enum Paths {
     public static var quarantine: String { "\(root)/quarantine.json" }
     public static var lastGood: String { "\(root)/last_good" }
     public static var supervisorHealth: String { "\(root)/supervisor.health" }
+    /// ⚠️ §6.5's shadow-mode marker. **Written by the supervisor at install
+    /// and by nothing else**, read by the enforcer every tick. It is the one
+    /// file that can stop enforcement, so it is root-owned 0644 like the
+    /// rest of this directory (which is 0700) and every malformed reading of
+    /// it resolves to "enforce" — see `ShadowMode.verdict`.
+    public static var soakMarker: String { "\(root)/soak.json" }
 
     // ── The deadfall's generated plist, rewritten by sync on policy change.
     public static var deadfallPlist: String { "\(launchDaemons)/com.hpc.deadfall.plist" }

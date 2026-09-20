@@ -7,6 +7,7 @@ import {
   handleDecommission,
   handleDevice,
   handleRevoke,
+  handleSoak,
 } from "./parent-devices.js";
 import {
   handleGrantOverride,
@@ -69,6 +70,8 @@ parentApp.get("/devices/:id", handleDevice);
 // 5-second polling. See `handleAttend`.
 parentApp.post("/devices/:id/attend", handleAttend);
 parentApp.post("/devices/:id/away", handleAway);
+// §6.5's shadow-mode soak. Read-only — it cannot extend a soak.
+parentApp.get("/devices/:id/soak", handleSoak);
 parentApp.post("/devices/:id/enrolment-code", handleReissueCode);
 // ⚠️ These two look alike and behave oppositely (§5.5). Both require a typed
 // confirmation, checked on the SERVER.

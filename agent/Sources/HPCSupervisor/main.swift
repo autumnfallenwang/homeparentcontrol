@@ -73,6 +73,7 @@ enum Supervisor {
             log("supervisor.installing", detail)
             if install(version: version, rollingBack: false) {
                 writeLastGood(inputs.runningVersion)
+                enterShadow(version: version, now: now)
                 kickstart()
             }
 
@@ -87,11 +88,67 @@ enum Supervisor {
             detail["reason"] = reason
             detail["rolling_back_to"] = target
             log("supervisor.rollback", detail)
+            // ⚠️ **Clear the soak marker before rolling back.** The target is
+            // a version that has already soaked, and leaving a marker naming
+            // the failed version would be stale anyway — but clearing it is
+            // what makes "a rollback enforces immediately" true by
+            // construction rather than by `ShadowMode`'s version check
+            // happening to catch it. Two independent reasons it enforces.
+            SoakMarker.clear()
             if install(version: target, rollingBack: true) { kickstart() }
         }
 
+        promoteIfDue(now: now)
         prunePkgCache(keeping: inputs.lastGoodVersion)
         writeHealth(decision: String(describing: step.decision))
+    }
+
+    // MARK: - Shadow mode (§6.5)
+
+    /// Put a freshly installed version into shadow — the ONLY place this
+    /// happens.
+    ///
+    /// ⚠️ **Refuses for a version that has already soaked.** Without that,
+    /// reinstalling the agent buys another unenforced day, every time, and
+    /// "reinstall the agent" becomes the bypass. The supervisor is also the
+    /// only component that could know the difference, because it is the one
+    /// that installs.
+    static func enterShadow(version: String, now: Date) {
+        if SoakMarker.soaked().contains(version) {
+            log("supervisor.shadow_skipped", [
+                "version": version, "reason": "already_soaked",
+            ])
+            return
+        }
+        let soak = ShadowMode.Soak.begin(version: version, at: now)
+        guard (try? SoakMarker.write(soak)) != nil else {
+            // ⚠️ If the marker cannot be written the new version simply
+            // ENFORCES. That is the right way to fail: an un-soaked version
+            // that locks is a smaller problem than a soak nobody can end.
+            log("supervisor.shadow_failed", ["version": version])
+            return
+        }
+        log("supervisor.shadow_entered", [
+            "version": version,
+            "until": ISO8601DateFormatter().string(from: soak.deadline),
+        ])
+    }
+
+    /// End a soak. Called when the control plane reports the promotion
+    /// criteria met, and unconditionally once the deadline has passed.
+    ///
+    /// ⚠️ The deadline check here is belt and braces: `ShadowMode.verdict`
+    /// already refuses an expired marker, so the enforcer is enforcing
+    /// before this runs. This only tidies the file and records the version
+    /// so the soak is never repeated.
+    static func promoteIfDue(now: Date) {
+        guard let soak = SoakMarker.read() else { return }
+        guard now >= soak.deadline else { return }
+        SoakMarker.recordSoaked(soak.version)
+        SoakMarker.clear()
+        log("supervisor.shadow_promoted", [
+            "version": soak.version, "reason": "deadline_reached",
+        ])
     }
 
     // MARK: - launchd

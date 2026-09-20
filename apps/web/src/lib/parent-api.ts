@@ -115,6 +115,8 @@ export interface DeviceCard {
     top_apps: { bundle_id: string; active_s: number; foreground_s: number }[];
   };
   banner: TripwireBanner | null;
+  /** ★ §6.5 — true while a newly installed version is soaking and NOT enforcing. */
+  shadow_mode: boolean;
   last_enforcement: {
     kind: string;
     summary: string;

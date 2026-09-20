@@ -1,6 +1,11 @@
 "use client";
 
-import { ACTIVE_TIME_EXPLANATION, ACTIVE_TIME_LABEL, healthPhrasing } from "@hpc/contract";
+import {
+  ACTIVE_TIME_EXPLANATION,
+  ACTIVE_TIME_LABEL,
+  healthPhrasing,
+  shadowModeNotEnforcing,
+} from "@hpc/contract";
 import Link from "next/link";
 import { appName, humanDuration, humanMinutes, weekdayOf } from "../lib/format.js";
 import type { DeviceCard } from "../lib/parent-api.js";
@@ -42,6 +47,18 @@ export function HealthCard({ card, children }: { card: DeviceCard; children?: Re
           <span className="text-sm text-slate-600">{card.child.display_name}</span>
         ) : null}
       </header>
+
+      {/*
+        ★ §6.5 — shadow mode is DELIBERATE non-enforcement, and it goes above
+        the health line because it overrides it: a device can be perfectly
+        HEALTHY and still not be enforcing tonight. Intended or not, the
+        parent has to be told in those words.
+      */}
+      {card.shadow_mode ? (
+        <div className="mt-3">
+          <Banner tone="alarm" title={shadowModeNotEnforcing(subject)} />
+        </div>
+      ) : null}
 
       <p className="mt-2 text-sm font-medium text-slate-900">{phrasing.headline}</p>
       {/* ★ The still-enforcing sentence. Absent only for DEGRADED, where it

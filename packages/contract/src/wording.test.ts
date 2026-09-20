@@ -9,6 +9,7 @@ import {
   LATE_GRANT_DOES_NOT_UNLOCK,
   lateGrantDoesNotUnlock,
   REVOKE,
+  shadowModeNotEnforcing,
 } from "./wording.js";
 
 /**
@@ -149,6 +150,27 @@ describe("3. Revoke vs Decommission (§5.5)", () => {
     // Typing one must not satisfy the other; that is the entire point of
     // making them typed.
     expect(REVOKE.confirmWord).not.toBe(DECOMMISSION.confirmWord);
+  });
+});
+
+describe("shadow mode (§6.5)", () => {
+  // ★ Intended non-enforcement is still non-enforcement, and it is MORE
+  // tempting to phrase gently than a fault is.
+  it("★ says NOT enforcing, in those words", () => {
+    const text = shadowModeNotEnforcing(subject, "tomorrow at 09:00");
+    expect(text).toContain("NOT enforcing");
+    expect(text).toContain("Lucy's Mac");
+  });
+
+  it("★ says the window ends, so it does not read as an outage", () => {
+    expect(shadowModeNotEnforcing(subject, "tomorrow")).toContain("enforcing again");
+    // And still says so when the deadline is unknown.
+    expect(shadowModeNotEnforcing(subject)).toContain("enforcing again");
+  });
+
+  it("★ never softens it into 'checking' alone", () => {
+    const text = shadowModeNotEnforcing(subject).toLowerCase();
+    expect(text).toContain("not enforcing");
   });
 });
 

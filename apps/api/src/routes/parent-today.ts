@@ -11,6 +11,7 @@ import {
   tripwires,
   usageDaily,
 } from "../db/schema.js";
+import { isSoaking } from "../lib/soak.js";
 import type { ParentVariables } from "./parent-context.js";
 
 /**
@@ -58,7 +59,7 @@ export async function handleToday(c: Context<{ Variables: ParentVariables }>) {
 
   const cards = await Promise.all(
     deviceRows.map(async (device) => {
-      const [usage, grants, boundary, banner, lastAction] = await Promise.all([
+      const [usage, grants, boundary, banner, lastAction, soaking] = await Promise.all([
         todayUsage(device.id, device.childTimezone, now),
         activeGrants(device.id, device.childId, now),
         tonightsBoundary(device.id),
@@ -67,6 +68,11 @@ export async function handleToday(c: Context<{ Variables: ParentVariables }>) {
           deviceLabel: device.label ?? "This Mac",
         }),
         lastEnforcement(device.id),
+        // ★ §6.5 — a soaking device is deliberately NOT enforcing, and the
+        // parent has to be told in those words. Fail-open is only
+        // defensible while it is loud, and a silent soak is a Mac that
+        // quietly stopped locking.
+        isSoaking(device.id, now),
       ]);
 
       return {
@@ -99,6 +105,7 @@ export async function handleToday(c: Context<{ Variables: ParentVariables }>) {
         usage_today: usage,
         // ★ ONE banner, not eight.
         banner,
+        shadow_mode: soaking,
         last_enforcement: lastAction,
       };
     }),

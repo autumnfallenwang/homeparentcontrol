@@ -191,6 +191,26 @@ export const ACTIVE_TIME_LABEL = "Active time";
 export const ACTIVE_TIME_EXPLANATION =
   "Minutes she was actually using the Mac, not minutes it was switched on.";
 
+// ── Shadow mode (§6.5). Not one of the four, but the same class of claim.
+
+/**
+ * ★ A soaking device is deliberately NOT enforcing, and the parent must be
+ * told so in those words.
+ *
+ * ⚠️ This is the same rule as `DEGRADED`'s: fail-open is only defensible
+ * while it is loud. The difference is that this one is *intended*, which
+ * makes it more tempting to phrase gently — "trying out a new version",
+ * "verifying the update". Those all leave a parent believing bedtime will
+ * happen tonight. It will not.
+ *
+ * The second sentence is the part that stops this reading as an outage: the
+ * window is bounded and ends on its own.
+ */
+export function shadowModeNotEnforcing(subject: Subject, until?: string): string {
+  const when = until ? ` It starts enforcing again ${until}.` : " It starts enforcing again soon.";
+  return `${subject.deviceLabel} is checking a new version and is NOT enforcing bedtime.` + when;
+}
+
 // ── Not one of the four, but the same class of mistake.
 
 /**
