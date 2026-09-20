@@ -19,3 +19,8 @@ export * from "./registry.js";
 export * from "./sync.js";
 export * from "./telemetry.js";
 export * from "./version.js";
+// ⚠️ Not a wire schema. The four load-bearing wordings live here because they
+// are consumed by two sides and must not drift — see the header of
+// `wording.ts`. They are deliberately NOT part of the JSON-Schema artefact;
+// `emit.ts` enumerates what it emits, so nothing here reaches the agent.
+export * from "./wording.js";
