@@ -35,10 +35,12 @@ prune.
 
 - [ ] `curl` can enrol a fake device, fetch a signed policy, post events, and read them back
       projected — **entirely on a laptop, no cluster**
-- [ ] Policy compiler golden-file suite passes; the compiler is a pure function that emits nothing
+- [x] Policy compiler golden-file suite passes; the compiler is a pure function that emits nothing
       when the content hash is unchanged
-- [ ] `lint`, `typecheck` and `test` all green via the `devkit-*` skills
-- [ ] Migration 0001 applies cleanly from empty
+- [x] `lint`, `typecheck` and `test` all green via the `devkit-*` skills
+- [x] Migrations apply cleanly from empty — **verified 2026-09-20** against a fresh database:
+      29 tables, both migrations recorded, the three dropped `users` columns absent, X12's
+      `shutdown_grace_s BETWEEN 60 AND 3600` present
 
 ## Traps to clear deliberately
 
@@ -151,6 +153,18 @@ Argo CD, Loki, alerting). The 11 cluster verifications stay blocked until k3s is
   Loki-specific code**; **C6 ❌ there is no alerting in the cluster at all** — no rules, no contact
   points, no notifiers, and the three live apps have none either. Recorded in
   [[arch-cluster-access]] and reflected in milestone 05.
+- 2026-09-20: ✅ **B4 CLOSED, and closed properly.** better-auth 1.4.19 not only accepts §5.9's
+  `permissions: { device: ["sync", "policy:read", "events:write"] }` shape — it round-trips it
+  through `verifyApiKey` and genuinely **enforces** it (an ungranted permission returns
+  `valid: false`). So device keys now carry one scope per endpoint instead of full authority, and
+  `deviceResolver` checks the scope the route needs, read from the lookup that already had to
+  happen. ⚠️ A key with no `permissions` is treated as unscoped-and-allowed so a deploy cannot lock
+  out an in-flight device; remove that branch once no such key can exist. Note the ungranted error
+  code is `KEY_NOT_FOUND`, which is misleading — do not surface it verbatim.
+- 2026-09-20: ✅ **"Migrations apply cleanly from empty" is now observed, not assumed.** It had been
+  an open assumption since step 1, because `0001` had only ever been applied on top of an existing
+  `0000`. Against a fresh database: 29 tables, 2 migrations recorded, the three dropped `users`
+  columns absent, X12's grace CHECK intact.
 - 2026-09-20: **Phase 2 step 4c shipped — `POST /events`. STEP 4 IS COMPLETE.** All five endpoints
   exist. Only step 5 (projection, rollups, prune) stands between here and milestone 01.
 - 2026-09-20: **The accepted-ids trap, avoided and then proven avoided.** `ON CONFLICT DO NOTHING

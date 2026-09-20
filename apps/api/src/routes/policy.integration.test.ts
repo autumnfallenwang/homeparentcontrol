@@ -5,6 +5,7 @@ import { createApp } from "../app.js";
 import { auth } from "../auth.js";
 import { closeDb, db } from "../db/index.js";
 import {
+  apikeys,
   children,
   devices,
   households,
@@ -215,6 +216,40 @@ d("GET /policy — auth and scope", () => {
     expect(bodyA.policy_version).toBe(1);
     // Different devices, different documents — device_id is inside the hash.
     expect(etagA).not.toBe(etagB);
+  });
+
+  /**
+   * ✅ B4, closed 2026-09-20. better-auth 1.4.19 accepts the §5.9 permissions
+   * shape, round-trips it, and enforces it. So device keys carry one scope per
+   * endpoint rather than full authority, and the resolver checks them.
+   */
+  it("refuses a key that lacks the endpoint's scope", async () => {
+    const f = await seedEnrolledDevice();
+    await db
+      .update(apikeys)
+      .set({ permissions: JSON.stringify({ device: ["sync", "events:write"] }) })
+      .where(eq(apikeys.id, f.keyId));
+
+    const res = await get(f.token);
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(String(body.detail)).toContain("policy:read");
+  });
+
+  it("accepts a key that carries it", async () => {
+    const f = await seedEnrolledDevice();
+    expect((await get(f.token)).status).toBe(200);
+  });
+
+  it("mints keys with all three scopes and nothing more", async () => {
+    const f = await seedEnrolledDevice();
+    const [row] = await db
+      .select({ permissions: apikeys.permissions })
+      .from(apikeys)
+      .where(eq(apikeys.id, f.keyId));
+    expect(JSON.parse(row?.permissions as string)).toEqual({
+      device: ["sync", "policy:read", "events:write"],
+    });
   });
 
   /**

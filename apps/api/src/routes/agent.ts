@@ -2,7 +2,8 @@ import { and, desc, eq, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { db } from "../db/index.js";
-import { devices, policyVersions } from "../db/schema.js";
+import { apikeys, devices, policyVersions } from "../db/schema.js";
+import type { DevicePermission } from "../lib/device-keys.js";
 import { agentOnError, ProblemError } from "../lib/problem.js";
 import { type AuthVariables, requireAgentAuth } from "../middleware/auth.js";
 import { handleEvents } from "./events.js";
@@ -41,18 +42,48 @@ agentApp.use("*", requireAgentAuth);
  * X1b. `policy.integration.test.ts` pins the equivalence so the break shows up
  * in CI rather than in production.
  */
-function deviceResolver(opts: { allowDecommissioned: boolean }) {
+/**
+ * Does this key carry the scope the route needs?
+ *
+ * better-auth stores `permissions` as a JSON string on the row. Read here
+ * rather than via `verifyApiKey` so the check costs no extra round trip — the
+ * device lookup already has to happen.
+ *
+ * ⚠️ Absent permissions means a key minted before scoping existed. Treated as
+ * unscoped-and-allowed so an in-flight device is not locked out by a deploy;
+ * remove this branch once no such key can exist.
+ */
+function hasPermission(raw: string | null, needed: DevicePermission): boolean {
+  if (!raw) return true;
+  try {
+    const parsed = JSON.parse(raw) as { device?: string[] };
+    return parsed.device?.includes(needed) ?? false;
+  } catch {
+    return false;
+  }
+}
+
+function deviceResolver(opts: { allowDecommissioned: boolean; permission?: DevicePermission }) {
   return createMiddleware<{ Variables: AgentVariables }>(async (c, next) => {
     const session = c.get("session") as { id?: string } | undefined;
     if (!session?.id) throw new ProblemError("unauthorized");
 
     const [device] = await db
-      .select({ id: devices.id, householdId: devices.householdId, status: devices.status })
+      .select({
+        id: devices.id,
+        householdId: devices.householdId,
+        status: devices.status,
+        permissions: apikeys.permissions,
+      })
       .from(devices)
+      .innerJoin(apikeys, eq(apikeys.id, devices.apiKeyId))
       .where(eq(devices.apiKeyId, session.id));
 
     if (!device) {
       throw new ProblemError("scopeViolation", "this credential is not bound to a device");
+    }
+    if (opts.permission && !hasPermission(device.permissions, opts.permission)) {
+      throw new ProblemError("scopeViolation", `this credential lacks ${opts.permission}`);
     }
     if (device.status === "decommissioned" && !opts.allowDecommissioned) {
       // ⚠️ The ONE place `decommission` is legitimate: authenticated, and set
@@ -71,6 +102,16 @@ function deviceResolver(opts: { allowDecommissioned: boolean }) {
 /** Nothing should hand a decommissioned device new policy or new work. */
 export const requireDevice = deviceResolver({ allowDecommissioned: false });
 
+/** Per-endpoint scopes (§5.9). Each route asks for exactly what it needs. */
+export const requireSyncScope = deviceResolver({
+  allowDecommissioned: false,
+  permission: "sync",
+});
+export const requirePolicyScope = deviceResolver({
+  allowDecommissioned: false,
+  permission: "policy:read",
+});
+
 /**
  * ⚠️ `/events` alone accepts a decommissioned device.
  *
@@ -81,7 +122,10 @@ export const requireDevice = deviceResolver({ allowDecommissioned: false });
  * is write-only, so accepting it costs nothing and preserves the one record
  * that documents the decommission.
  */
-export const requireDeviceForTelemetry = deviceResolver({ allowDecommissioned: true });
+export const requireDeviceForTelemetry = deviceResolver({
+  allowDecommissioned: true,
+  permission: "events:write",
+});
 
 /**
  * Credential introspection. Answers "is this key valid, and who is it?" — the
@@ -110,7 +154,7 @@ agentApp.get("/whoami", requireDevice, (c) => {
  * it looking HEALTHY, which is precisely the failure the health design exists
  * to prevent. The spec never says this; the integration test asserts it.
  */
-agentApp.get("/policy", requireDevice, async (c) => {
+agentApp.get("/policy", requirePolicyScope, async (c) => {
   const deviceId = c.get("deviceId");
 
   const [current] = await db
@@ -150,7 +194,7 @@ agentApp.get("/policy", requireDevice, async (c) => {
  * `POST /api/agent/v1/sync` — the tick, and the heartbeat (A.26). The handler
  * lives in `sync.ts`; this file stays a routing table.
  */
-agentApp.post("/sync", requireDevice, handleSync);
+agentApp.post("/sync", requireSyncScope, handleSync);
 
 /**
  * `POST /api/agent/v1/events` — telemetry (§4.4).

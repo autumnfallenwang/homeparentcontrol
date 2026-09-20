@@ -1,5 +1,19 @@
 import { auth } from "../auth.js";
 
+/**
+ * What a device credential may do. Nothing else in the system mints keys, so
+ * this is the complete authority any agent ever holds.
+ *
+ * ⚠️ `deviceResolver` in routes/agent.ts checks these per route. Stamping them
+ * without checking them would be theatre.
+ */
+export const DEVICE_PERMISSIONS = {
+  device: ["sync", "policy:read", "events:write"],
+} as const;
+
+/** One scope per agent endpoint. */
+export type DevicePermission = (typeof DEVICE_PERMISSIONS)["device"][number];
+
 export interface MintDeviceKeyInput {
   /** The household's `isService` user. NEVER a human parent — A.21. */
   serviceUserId: string;
@@ -46,9 +60,12 @@ export async function mintDeviceKey(input: MintDeviceKeyInput): Promise<MintedDe
         deviceId: input.deviceId,
         householdId: input.householdId,
       },
-      // NOTE: no `permissions` yet — gate B4 (what shape better-auth 1.4.19
-      // actually stores and enforces) is still open. Scoping a device key to
-      // the agent endpoints is additive once B4 is settled.
+      // §5.9 — one scope per endpoint, so a leaked device key cannot do more
+      // than a device needs to. ✅ B4 closed 2026-09-20: better-auth 1.4.19
+      // accepts this exact shape, round-trips it through `verifyApiKey`, and
+      // genuinely enforces it (a permission not granted returns valid:false).
+      // Spread: the const assertion makes the array readonly, better-auth wants mutable.
+      permissions: { device: [...DEVICE_PERMISSIONS.device] },
     },
   });
 
