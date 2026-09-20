@@ -29,10 +29,8 @@ public enum SyncDaemon {
     static var evictedSinceLastSync = 0
     static var lastEventFlush = Date.distantPast
     static var pendingReports: [DesiredReconciler.Report] = []
+    static var samplerState = Sampler.State()
 
-    /// §4.4 — "flushed every `flush_interval_s` (300 s), **immediately for any
-    /// `class: "audit"` event**".
-    static let flushIntervalS: TimeInterval = 300
     /// "in 2,000-event batches (up to 4 per tick) while draining a backlog".
     static let batchSize = 2_000
     static let maxBatchesPerTick = 4
@@ -62,7 +60,73 @@ public enum SyncDaemon {
 
         start()
         schedule(on: dispatchQueue, afterMs: 0)
+
+        // ⚠️ A SECOND timer, and a fixed one.
+        //
+        // §4.2's adaptive cadence belongs to the sync tick and can back off
+        // to 300 s against a dead server. Sampling must not: `active_s` is a
+        // meter, and a meter whose interval stretches when the network
+        // wobbles produces usage numbers that quietly depend on server
+        // uptime. The policy's `sample_interval_s` (60) is the only thing
+        // that sets this.
+        let sampler = DispatchSource.makeTimerSource(queue: dispatchQueue)
+        sampler.schedule(
+            deadline: .now(), repeating: .seconds(sampleIntervalS()), leeway: .seconds(2))
+        sampler.setEventHandler { sampleTick() }
+        sampler.resume()
+        samplerTimer = sampler
+
         dispatchMain()
+    }
+
+    /// Held so the timer is not deallocated the moment `main` returns.
+    static var samplerTimer: DispatchSourceTimer?
+
+    static func sampleIntervalS() -> Int {
+        max(5, telemetry().sampleIntervalS)
+    }
+
+    /// The policy's `telemetry` block, or this build's defaults when there is
+    /// no readable policy yet.
+    static func telemetry() -> PolicyDocument.Telemetry {
+        loadedPolicy()?.document.telemetry ?? .fallback
+    }
+
+    // MARK: - Sampling
+
+    /// One observation, folded into events and queued (§4.1, A.33).
+    ///
+    /// ⚠️ Nothing here can reach enforcement. It runs in the sync daemon —
+    /// §3.1's table marks it "contains enforcement logic: ❌ none" — writes
+    /// only to `queue.sqlite`, and every probe it runs has a 5 s deadline so
+    /// a hung `lsappinfo` costs one sample rather than the timer.
+    static func sampleTick() {
+        guard let queue else { return }
+        let config = telemetry()
+        guard config.enabled else { return }
+
+        let observation = SampleSource.observe()
+        let output = Sampler.sample(observation, state: samplerState, telemetry: config)
+        samplerState = output.state
+        guard !output.events.isEmpty else { return }
+
+        let rows = output.events.map { event -> Queue.Row in
+            var data: [String: Any] = [:]
+            for (key, value) in event.data { data[key] = value }
+            for (key, value) in event.text { data[key] = value }
+            return Queue.Row(
+                eventId: EventID.v7(now: event.at),
+                ts: event.at,
+                type: event.type,
+                // ⚠️ Samples, not audits. They are the bulk of the volume and
+                // the first thing eviction drops — which is correct: a
+                // rollup degrades gracefully when thinned, an enforcement
+                // record does not.
+                cls: .sample,
+                bootId: bootId,
+                data: data)
+        }
+        try? queue.enqueue(rows)
     }
 
     static func start() {
@@ -497,7 +561,8 @@ public enum SyncDaemon {
 
     static func flushEventsIfDue(_ client: Client, _ queue: Queue) {
         let census = (try? queue.census()) ?? .init()
-        let due = Date().timeIntervalSince(lastEventFlush) >= flushIntervalS
+        let due = Date().timeIntervalSince(lastEventFlush)
+            >= TimeInterval(telemetry().flushIntervalS)
         // "immediately for any `class: audit` event" — an enforcement action
         // must not wait five minutes to become visible to a worried parent.
         guard due || census.auditCount > 0 else { return }
@@ -566,11 +631,20 @@ public enum SyncDaemon {
                 reason: plan.evictions.first?.reason ?? "cap"))
     }
 
-    /// ⚠️ `PolicyDocument` does not decode the `telemetry` block, so the caps
-    /// are this build's defaults rather than the policy's. Recorded as a known
-    /// limitation in milestone 03 rather than silently diverging: a parent who
-    /// lowers `max_queue_events` today changes nothing on the device.
-    static func limits() -> QueuePolicy.Limits { .init() }
+    /// The caps, from the policy rather than from this build.
+    ///
+    /// ⚠️ These were hard-coded defaults until the `telemetry` block was
+    /// decoded. A parent who lowered `max_queue_events` changed a row in
+    /// Postgres and nothing on the device — a control that looks like a
+    /// control and is not.
+    static func limits() -> QueuePolicy.Limits {
+        let config = telemetry()
+        return .init(
+            maxEvents: config.maxQueueEvents,
+            maxBytes: config.maxQueueBytes,
+            maxAgeDays: config.maxQueueAgeDays,
+            auditRetentionDays: config.auditRetentionDays)
+    }
 
     // MARK: - Errors
 

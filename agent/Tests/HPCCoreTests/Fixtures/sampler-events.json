@@ -1,0 +1,25 @@
+[
+  {
+    "data" : {
+      "console_user" : "501",
+      "state" : "active"
+    },
+    "type" : "session.state"
+  },
+  {
+    "data" : {
+      "active_s" : 59,
+      "bundle_id" : "com.apple.Safari",
+      "cpu_pct" : 12.5,
+      "foreground_s" : 60
+    },
+    "type" : "app.usage_sample"
+  },
+  {
+    "data" : {
+      "console_user" : "501",
+      "state" : "locked"
+    },
+    "type" : "session.state"
+  }
+]

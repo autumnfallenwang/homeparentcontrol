@@ -160,6 +160,101 @@ public struct PolicyDocument: Codable, Equatable, Sendable {
         }
     }
 
+    /// §4.3's `telemetry` block.
+    ///
+    /// ⚠️ **Tolerance runs the OTHER way here, and that is deliberate.**
+    /// Everywhere else in this file a field we cannot read degrades toward
+    /// MORE enforcement, because the cost of guessing wrong is a Mac usable
+    /// past bedtime. Telemetry cannot affect enforcement at all, so the cost
+    /// of guessing wrong is inverted: a missing or unreadable block that
+    /// defaulted to "collect nothing" would silently starve the projector,
+    /// and the first symptom is a parent's report page that renders
+    /// perfectly with no data in it. Every default below therefore errs
+    /// toward collecting.
+    ///
+    /// ⚠️ `enabled: false` is still honoured exactly. That is a parent's
+    /// explicit choice, not an absence.
+    public struct Telemetry: Codable, Equatable, Sendable {
+        public let enabled: Bool
+        public let sampleIntervalS: Int
+        public let flushIntervalS: Int
+        /// Glob-ish patterns: `enforcement.*`, `app.usage_sample`. Matched by
+        /// `collects(_:)`, never by string equality.
+        public let collect: [String]
+        public let maxQueueEvents: Int
+        public let maxQueueBytes: Int
+        public let maxQueueAgeDays: Int
+        public let auditRetentionDays: Int
+
+        public static let fallback = Telemetry(
+            enabled: true, sampleIntervalS: 60, flushIntervalS: 300,
+            collect: ["session.state", "enforcement.*", "power.*", "app.usage_sample"],
+            maxQueueEvents: 50_000, maxQueueBytes: 33_554_432,
+            maxQueueAgeDays: 14, auditRetentionDays: 90)
+
+        enum CodingKeys: String, CodingKey {
+            case enabled, collect
+            case sampleIntervalS = "sample_interval_s"
+            case flushIntervalS = "flush_interval_s"
+            case maxQueueEvents = "max_queue_events"
+            case maxQueueBytes = "max_queue_bytes"
+            case maxQueueAgeDays = "max_queue_age_days"
+            case auditRetentionDays = "audit_retention_days"
+        }
+
+        public init(
+            enabled: Bool, sampleIntervalS: Int, flushIntervalS: Int, collect: [String],
+            maxQueueEvents: Int, maxQueueBytes: Int, maxQueueAgeDays: Int,
+            auditRetentionDays: Int
+        ) {
+            self.enabled = enabled
+            self.sampleIntervalS = sampleIntervalS
+            self.flushIntervalS = flushIntervalS
+            self.collect = collect
+            self.maxQueueEvents = maxQueueEvents
+            self.maxQueueBytes = maxQueueBytes
+            self.maxQueueAgeDays = maxQueueAgeDays
+            self.auditRetentionDays = auditRetentionDays
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            let base = Telemetry.fallback
+            enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? base.enabled
+            sampleIntervalS =
+                (try? c.decode(Int.self, forKey: .sampleIntervalS)) ?? base.sampleIntervalS
+            flushIntervalS =
+                (try? c.decode(Int.self, forKey: .flushIntervalS)) ?? base.flushIntervalS
+            collect = (try? c.decode([String].self, forKey: .collect)) ?? base.collect
+            maxQueueEvents =
+                (try? c.decode(Int.self, forKey: .maxQueueEvents)) ?? base.maxQueueEvents
+            maxQueueBytes =
+                (try? c.decode(Int.self, forKey: .maxQueueBytes)) ?? base.maxQueueBytes
+            maxQueueAgeDays =
+                (try? c.decode(Int.self, forKey: .maxQueueAgeDays)) ?? base.maxQueueAgeDays
+            auditRetentionDays =
+                (try? c.decode(Int.self, forKey: .auditRetentionDays)) ?? base.auditRetentionDays
+        }
+
+        /// Does `collect` admit this event type?
+        ///
+        /// ⚠️ An EMPTY list means collect everything, not nothing. §4.3 gives
+        /// `collect` only as a populated example and never says what absence
+        /// means; reading it as "nothing" turns a field a parent never
+        /// touched into a silent opt-out of the product's reporting half.
+        public func collects(_ type: String) -> Bool {
+            guard enabled else { return false }
+            guard !collect.isEmpty else { return true }
+            for pattern in collect {
+                if pattern == type { return true }
+                if pattern.hasSuffix(".*"),
+                   type.hasPrefix(String(pattern.dropLast(1))) { return true }
+                if pattern == "*" { return true }
+            }
+            return false
+        }
+    }
+
     public let policyVersion: Int
     public let issuedAt: Date
     public let deviceId: String
@@ -167,9 +262,10 @@ public struct PolicyDocument: Codable, Equatable, Sendable {
     public let timezone: String
     public let schedule: Schedule
     public let overrides: [Override]
+    public let telemetry: Telemetry
 
     enum CodingKeys: String, CodingKey {
-        case subject, timezone, schedule, overrides
+        case subject, timezone, schedule, overrides, telemetry
         case policyVersion = "policy_version"
         case issuedAt = "issued_at"
         case deviceId = "device_id"
@@ -188,6 +284,9 @@ public struct PolicyDocument: Codable, Equatable, Sendable {
         // ⚠️ Overrides are the opposite case and CAN be tolerant: dropping a
         // relaxation errs toward MORE enforcement, which is the safe side.
         overrides = (try? c.decode([Override].self, forKey: .overrides)) ?? []
+        // Absent or unreadable → collect. See `Telemetry` for why this one
+        // field degrades in the opposite direction to everything above it.
+        telemetry = (try? c.decode(Telemetry.self, forKey: .telemetry)) ?? Telemetry.fallback
     }
 
     /// Decode from raw JWS payload bytes. The caller verifies the signature
