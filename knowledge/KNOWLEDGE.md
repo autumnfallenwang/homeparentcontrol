@@ -49,3 +49,4 @@ The skill picks a slug, writes the file with the right frontmatter, and updates 
 | [verify-macos-claims](./verify-macos-claims.md) | `feedback` | Documentation is a hypothesis — five of six audited macOS claims were wrong |
 | [corepack-runtime-download](./corepack-runtime-download.md) | `feedback` | A pnpm `CMD` + `USER node` re-downloads pnpm every cold start, and **fails to boot offline** |
 | [read-siblings-via-gh](./read-siblings-via-gh.md) | `feedback` | The sibling clones on this Mac are months stale — read them with `gh api` |
+| [arch-cluster-access](./arch-cluster-access.md) | `reference` | Reaching k3s/Argo/Grafana from the Mac, and the `OutOfSync` red herring |

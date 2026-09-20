@@ -30,3 +30,14 @@ is always current. Record the commit you read against when it matters — phase 
 
 The failure direction is **remote behind local**, not the reverse: the owner rarely commits from the
 Mac, so an unpushed local commit is unlikely. Both clones were clean and `ahead=0` when checked.
+
+## The exception: `arch-infra`
+
+`arch-infra` **is** cloned locally, deliberately, because we **write** to it — the Argo CD
+Application CR for this app lives there and deploys are driven by committing to it.
+
+⚠️ **Always `git pull` before editing it.** Every main build of *any* app in the house pushes an
+image-tag commit to `arch-infra` from CI, so it moves without you and goes stale within days.
+Editing a stale clone produces a conflict at best and a reverted image tag at worst.
+
+The rule generalises: **read-only references → `gh api`. Repos we commit to → clone, and pull first.**

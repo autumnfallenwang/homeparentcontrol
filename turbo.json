@@ -2,6 +2,8 @@
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
     "build": { "dependsOn": ["^build"], "outputs": ["dist/**", ".next/**", "!.next/cache/**"] },
+    "@hpc/api#build": { "dependsOn": ["^build"], "outputs": [] },
+    "@hpc/contract#build": { "dependsOn": ["^build"], "outputs": [] },
     "dev": { "cache": false, "persistent": true },
     "test": { "dependsOn": ["^build"] },
     "test:fast": { "dependsOn": ["^build"] },

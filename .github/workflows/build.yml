@@ -41,5 +41,13 @@ jobs:
       # the runner does not ship.
       - run: pnpm test:fast
 
-# build-and-deploy + bump-arch-infra land in phase 5 with the rest of the
-# GitOps chain. See docs/milestones/05-cluster-deployment.md.
+# 🛑 DELIBERATELY NO DEPLOY JOBS.
+#
+# `build-and-deploy` and `bump-arch-infra` land in phase 5, not before. Adding
+# them earlier would ship an unfinished app to the cluster on the next merge to
+# main -- the GitOps chain has no staging step, and the `root` app-of-apps syncs
+# automatically with prune enabled.
+#
+# This absence is one of four independent blocks on deployment; the others are
+# the missing Application CR in arch-infra, the missing GHCR packages, and the
+# unset ARCH_INFRA_TOKEN. See docs/milestones/05-cluster-deployment.md.

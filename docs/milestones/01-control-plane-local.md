@@ -66,6 +66,11 @@ whether its control plane is local or in the cluster is hypothesis **H1** paying
 The Arch desktop stays the **deploy** target (phase 5). It cannot host a macOS test VM — arm64 macOS
 virtualizes only on Apple Silicon hosts — so no macOS work moves there regardless of its specs.
 
+✅ **Cluster reachable from the Mac on the home LAN** (verified 2026-09-20): `argocd.arch.internal`
+and `grafana.arch.internal` open in a browser with no VPN, and `kubectl` works after copying the
+kubeconfig with its server URL rewritten. See [[arch-cluster-access]]. Use it to **observe**, not to
+deploy — shipping is still `git commit`.
+
 Enforcement is developed with the **shutdown rung stubbed at compile time** (see the dev-mode
 corollary in `../design-decisions.md`). Warnings, lock and the grace timer are exercised for real on
 the Air. One scheduled end-to-end on the Mac mini closes it out, once.
@@ -97,6 +102,12 @@ Argo CD, Loki, alerting). The 11 cluster verifications stay blocked until k3s is
   hides it; k8s creates a new container per pod restart, so it would crashloop during an npm outage.
   Fixed with `COREPACK_HOME` + chown. **`homework` and `homecal` ship the same unpatched file.**
   Captured as [[corepack-runtime-download]].
+- 2026-09-20: **Cluster surveyed from the Mac** — k3s v1.35.4 up 133 d, Argo CD healthy, GitOps chain
+  proven (`homework`'s pinned tag == its repo HEAD). Two of T6's eleven cluster verifications
+  resolved: **C2 ✅ Alloy already scrapes pod stdout cluster-wide, so the control plane needs zero
+  Loki-specific code**; **C6 ❌ there is no alerting in the cluster at all** — no rules, no contact
+  points, no notifiers, and the three live apps have none either. Recorded in
+  [[arch-cluster-access]] and reflected in milestone 05.
 - 2026-09-18: Fixed two defects in the devkit-generated skills: `devkit-typecheck` and `devkit-test`
   used bare `pnpm tsc --noEmit` / `pnpm vitest run`, which in a turbo monorepo check nothing and
   find nothing respectively. Both now call the root turbo tasks.

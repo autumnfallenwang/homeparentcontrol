@@ -706,12 +706,35 @@ owner's to decide. Manufacturing another fan-out would produce restatement, not 
 - **B3** Does launchd deliver SIGTERM on *full shutdown*, not just `launchctl unload`? Apple
   documents yes (T2); `EXPECTED_OFFLINE` depends on it.
 
-### C — Needs cluster access
+### C — Cluster access ✅ obtained 2026-09-20; 9 of 11 checks done
 
-T6's 11 items. Priority: **confirm a Grafana contact point exists and a test notification actually
-reaches the parent's phone** (the design is inert otherwise), and whether the existing Alloy
-DaemonSet already scrapes pod stdout cluster-wide — if it does, the control plane needs **zero**
-Loki-specific code.
+The owner reached the cluster from the Mac over the home LAN. Baseline: k3s v1.35.4+k3s1 on
+`aaron-desktop-arch`, Ready 133 d, Argo CD running, 8 Applications. **The GitOps chain is proven** —
+`homework`'s pinned image tag equals its repo HEAD exactly.
+
+| Check | Result |
+|---|---|
+| **C2/C8** | ✅ **Alloy already scrapes pod stdout cluster-wide** (`discovery.kubernetes` + `loki.source.kubernetes` + `loki.write`). **The control plane needs zero Loki-specific code** — write JSON to stdout, Alloy collects it. C8 partial: exact relabel rules still unread, needed before the LogQL alert rules are written |
+| **C6** | ❌ **There is no alerting at all.** `/etc/grafana/provisioning/alerting/` in the running pod is empty — no rules, no contact points, no notifiers. **Pre-existing**: the three live apps have no alerting either |
+| — | `homecal`/`homenews`/`homework` show **OutOfSync but Healthy**. Drift is `StatefulSet/<app>-db` only; sync reports "Succeeded". Benign Argo/StatefulSet behaviour, not a pipeline fault |
+
+⚠️ **C6 sharpens D.2.** If no push path is built, agent-death detection is pull-only and the
+heartbeat is worth only as much as the habit of opening a dashboard. That is a legitimate choice,
+but it should be made rather than inherited.
+
+**Second sweep, same day — six more answered:**
+
+| Check | Result |
+|---|---|
+| **C11** | Grafana **11.1.5**. Unified Alerting and State timeline both available — §7 is supported as written |
+| **C7** | **Provisioning files**, no operator, no sidecar. Alert rules and dashboards are GitOps'd via `arch-infra/platform/observability/grafana/values.yaml` |
+| **C5** | **No Prometheus anywhere** — zero pods. Confirms T6: logs + heartbeat only |
+| **C4** | Compactor on, `retention_period: 336h`. ⚠️ The 720 h per-stream selector covers `llmgw\|homecal\|homenews` but **not `homework`** — it is stale, and we would not be in it either |
+| **C3** | `reject_old_samples_max_age: 168h`. 🎉 **The backfill-rewrite worry dissolves** — a drained agent backlog reaches Loki as control-plane stdout *at forward time*, so Loki stamps ingestion time and never sees an out-of-order sample. Event time lives in Postgres |
+| **C1** | `auth_enabled: false`, and moot regardless since C2 removed the forwarder |
+
+**Remaining: C9** (explicitly not required by the design, A.29) and **C10** (blocked on C6 — there
+are no notification policies because there is no alerting).
 
 ### D — Design ✅ complete
 

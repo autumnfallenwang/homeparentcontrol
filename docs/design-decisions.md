@@ -2260,22 +2260,32 @@ tick a minute. **There is nothing to tune, and no Prometheus for the agent.**
 | **V-LOCK** | **Two independent lock paths plus a boot-time self-test** | 1 h | §3.5. 📄 `ScreenSaverEngine.app` is the next `CGSession`, and macOS 27 has already been reported to have removed the `CGSession` path |
 | **V-27** | Re-verify everything above on **macOS 27** | — | ⚠️ **Everything empirical here is macOS 26.6.2.** macOS 27 shipped 2026-09-14 with a rewritten Screen Time. **Pin the Mac mini to 26.x and re-test every enforcement primitive before accepting the upgrade** |
 
-### 8.3 Cluster verifications — the 11, still owed
+### 8.3 Cluster verifications — 9 of 11 now done
 
-None has been done; there has been no cluster access throughout. Ordered by leverage.
+✅ **Cluster access obtained 2026-09-20** (owner on the home LAN; `ssh aaronwang@192.168.1.163`).
+Three checks resolved; the rest still owed. Ordered by leverage.
+
+**Cluster baseline:** k3s v1.35.4+k3s1 on `aaron-desktop-arch`, control-plane Ready 133 d. Argo CD
+running (7 pods), 8 Applications. `homecal`/`homenews`/`homework` report **OutOfSync but Healthy** —
+the drift is `StatefulSet/<app>-db` **only**, and the sync itself reports *"Succeeded, all tasks
+run"*. Benign Argo behaviour on StatefulSets (immutable `volumeClaimTemplates` + ServerSideApply
+defaults), identical across all three. **Not a broken pipeline.**
+
+✅ **The GitOps chain is proven end to end:** `homework`'s pinned `api.image.tag` is
+`137b16b93c4c…`, which is exactly its repo HEAD. CI → GHCR → `arch-infra` → Argo reconciles today.
 
 | # | Check | Why it matters |
 |---|---|---|
-| **C6** | ⚠️ **What contact point exists, and does a test notification actually reach the parent?** | **Highest priority. Everything in §7 is inert otherwise**, and it is the gate on D.2's push option |
-| **C2** | **Does the existing Alloy DaemonSet scrape pod stdout cluster-wide?** Read its ConfigMap/CR: `discovery.kubernetes` + relabel rules, which namespaces, which labels | **If yes, the control plane needs zero Loki-specific code.** The single highest-leverage check after C6 |
-| **C8** | **The real Loki stream labels** in `arch-infra/platform/observability/alloy/values.yaml` | §7.5's rules assume `{app=, component=}`; the chart labels pods `app.kubernetes.io/*`. ⚠️ **Nobody has read this file** — every statement about how logs get labelled is inference |
-| **C1** | Loki push endpoint and auth — `auth_enabled`? `X-Scope-OrgID`? a gateway with basic auth? | Sizes the forwarder's auth code |
-| **C3** | Loki `limits_config` — `reject_old_samples_max_age`, `max_chunk_age`, ingestion rates, `max_streams_per_user` | Sizes the agent spool and decides whether §7.2's backfill rewrite is needed |
-| **C4** | Is the compactor running with `retention_enabled: true`? | Without it, nothing ages out and the store grows forever |
-| **C5** | Is there a Prometheus or Mimir at all? | Decides whether an optional gauge is worth exposing. **The design must not depend on it** |
-| **C7** | How are Grafana alert rules and dashboards provisioned — sidecar ConfigMaps, grafana-operator CRs, provisioning files? | Rules must be GitOps'd, not clicked in. Determines the file format |
-| **C10** | Notification-policy routing for `alertname=DatasourceNoData` | A5 depends on No Data → Alerting actually being delivered |
-| **C11** | Grafana version | Confirms Unified Alerting, `or vector(0)` handling, State timeline |
+| **C6** | ❌ **ANSWERED 2026-09-20 — there is no alerting at all.** `/etc/grafana/provisioning/alerting/` in the running Grafana pod is **empty**: no alert rules, no contact points, no notifiers | ⚠️ **Everything in §7 is currently inert, and this is a pre-existing gap, not one this project introduces.** `homework`, `homecal` and `homenews` could each be silently broken right now with nothing to say so. It is also the honest input to **D.2**: if no push path is built, agent-death detection is pull-only and the heartbeat is worth exactly as much as the habit of opening the dashboard |
+| **C2** | ✅ **ANSWERED 2026-09-20 — YES.** The `alloy` DaemonSet (1/1 ready, namespace `observability`) has `discovery.kubernetes`, `loki.source.kubernetes` and `loki.write` in its ConfigMap | 🎉 **The control plane needs ZERO Loki-specific code.** Write structured JSON to stdout and Alloy collects it cluster-wide. Deletes the forwarder, its auth (C1), and the backfill-rewrite question (C3) from the app's scope — they become Alloy/Loki config concerns, not ours |
+| **C8** | 🟡 **PARTIAL 2026-09-20.** Confirmed Alloy uses `discovery.kubernetes` + `loki.source.kubernetes`, so labels come from pod metadata rather than anything we set. The exact relabel rules were not read | §7.5's LogQL still needs the real label names before the alert rules are written. Now a 5-minute read of the live ConfigMap rather than a blocked item |
+| **C1** | ✅ **`auth_enabled: false`.** Moot anyway — C2 removed the forwarder, so we never write to Loki directly | No auth code. Nothing to size |
+| **C3** | ✅ **`reject_old_samples: true`, `reject_old_samples_max_age: 168h`** (7 d). No `max_chunk_age` override | 🎉 **§7.2's backfill rewrite is unnecessary.** A drained agent backlog reaches Loki as *control-plane stdout at forward time*, so Loki stamps ingestion time and can never see an out-of-order sample. The authoritative event time lives in Postgres (T5: events are Postgres-authoritative). The whole out-of-order worry dissolves |
+| **C4** | ✅ **Yes** — `compactor.retention_enabled: true`, global `retention_period: 336h` (14 d). Per-stream overrides: 72 h for `kube-system\|argocd\|observability`, 720 h for `llmgw\|homecal\|homenews` | ⚠️ **The 720 h selector does not include `homework`** — it is stale, and `homeparentcontrol` will not be in it either. Either add ourselves to that selector in `arch-infra/platform/observability/loki/values.yaml` or accept the 14-day default |
+| **C5** | ✅ **No — zero Prometheus/Mimir/Victoria pods cluster-wide** | Confirms T6's call: no Prometheus for the agent, and the optional control-plane gauge has nowhere to go. Logs + heartbeat only |
+| **C7** | ✅ **Provisioning files.** No grafana-operator, no dashboard sidecar container — a single `grafana` container with `GF_PATHS_PROVISIONING=/etc/grafana/provisioning`. The only related CRD is `podlogs.monitoring.grafana.com` (Alloy's) | Alert rules and dashboards are GitOps'd by adding them to the Grafana chart's values in **`arch-infra/platform/observability/grafana/values.yaml`**, which renders into the provisioning dir. Not clicked in, not a CR |
+| **C10** | ⏸️ **Blocked on C6** — there are no notification policies to inspect, because there is no alerting configured at all | Answerable the moment C6 is fixed |
+| **C11** | ✅ **Grafana 11.1.5** | Unified Alerting is default from 9.x, and the State timeline panel exists. §7's design is supported as written |
 | **C9** | Can the k3s node reach the mini at L3? | **Not required by this design (A.29).** Listed only so it is not re-proposed |
 
 **Plus four day-one build checks**, all cheap, all before migration 0002:
