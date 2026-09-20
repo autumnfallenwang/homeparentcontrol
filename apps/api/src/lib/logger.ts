@@ -20,4 +20,32 @@ export const log = pino({
   level: process.env.LOG_LEVEL ?? "info",
   base: { service, version: pkg.version },
   timestamp: pino.stdTimeFunctions.isoTime,
+  /**
+   * §5.8 — device tokens (`hpc_dk_…`), enrolment codes and the `x-api-key`
+   * header must never reach Loki. Biome's `noSecrets` catches literals in
+   * source; it cannot see a runtime log line.
+   *
+   * ⚠️ Known gap, deliberate: pino redacts by PATH, not by value. It cannot
+   * censor a credential interpolated into a message string. These paths cover
+   * every shape we actually log; the rest is a discipline — never put a token
+   * in the message, always in a field.
+   */
+  redact: {
+    paths: [
+      "token",
+      "*.token",
+      "credential.token",
+      "*.credential.token",
+      "apiKey",
+      "*.apiKey",
+      "api_key",
+      "*.api_key",
+      "code",
+      "*.code",
+      "req.headers['x-api-key']",
+      "*.headers['x-api-key']",
+      "headers['x-api-key']",
+    ],
+    censor: "[redacted]",
+  },
 });

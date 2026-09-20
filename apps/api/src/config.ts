@@ -10,6 +10,23 @@ export const config = {
   tz: process.env.TZ ?? "America/New_York",
 
   /**
+   * Set ONLY in the cluster (the chart sets `.arch.internal`). The UI and the
+   * API are two different ingress hosts, so the session cookie has to be
+   * domain-scoped to travel between them.
+   *
+   * ⚠️ Must stay UNSET in local dev. A `Domain=.arch.internal` cookie is
+   * invalid for `localhost` and the browser drops it silently, which presents
+   * as "sign-in returns 200, then every protected request 401s".
+   *
+   * These are subdomains of one registrable domain, so they are same-SITE:
+   * SameSite=Lax is correct and no Secure/TLS is required. X4 is not in the way.
+   */
+  cookieDomain: process.env.COOKIE_DOMAIN?.trim() || undefined,
+
+  /** Requests per minute per caller on /api/*. See middleware/rate-limit.ts. */
+  rateLimitPerMin: Number(process.env.RATE_LIMIT_PER_MIN ?? 600),
+
+  /**
    * Retention ladder (§5.7). Raw samples are the bulk; everything projected
    * from them outlives them, so a pruned window is still visibly pruned in
    * reports rather than silently absent.

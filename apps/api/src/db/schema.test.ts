@@ -79,6 +79,23 @@ describe("safety-encoding columns", () => {
     expect(col("policy_sets", "failMode")).toBeUndefined();
   });
 
+  it("users carries isService — A.21's machine identity", () => {
+    const c = col("users", "isService");
+    expect(c, "device keys hang off this user, not off a parent").toBeDefined();
+    expect(c?.notNull).toBe(true);
+  });
+
+  it("users drops homecal's three calendar columns", () => {
+    // Inherited verbatim with better-auth's core tables and unused here: there
+    // is no calendar, no digest, and holidayCountries duplicates the real one
+    // on households. `color` was worse than dead — notNull with no default,
+    // which breaks the very first sign-up.
+    for (const dead of ["color", "holidayCountries", "receivesDailyDigest"]) {
+      expect(col("users", dead), `users.${dead} should be gone`).toBeUndefined();
+    }
+    expect(col("households", "holidayCountries"), "the real one stays").toBeDefined();
+  });
+
   it("denormalises householdId onto the telemetry tables as the tenancy key", () => {
     for (const t of ["events", "usage_hourly", "usage_daily", "enforcement_log"]) {
       expect(col(t, "householdId"), `${t}.householdId`).toBeDefined();

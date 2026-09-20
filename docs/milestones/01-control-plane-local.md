@@ -151,6 +151,36 @@ Argo CD, Loki, alerting). The 11 cluster verifications stay blocked until k3s is
   Loki-specific code**; **C6 ❌ there is no alerting in the cluster at all** — no rules, no contact
   points, no notifiers, and the three live apps have none either. Recorded in
   [[arch-cluster-access]] and reflected in milestone 05.
+- 2026-09-20: **Phase 2 step 2 — auth shipped.** Parent (session cookie) and agent (`x-api-key`)
+  sub-apps, both mounted single-prefix; `homecal`'s auth lifted near-verbatim. **B2 ✅ closed** — and
+  deliberately falsified first: turning the per-key limiter back on makes it fail at exactly
+  10 × 200, the documented quota. **X2 places 2 and 3 are in** (`lib/device-keys.ts`,
+  `lib/assert-x2.ts`); the boot assertion was proven to refuse start against a hand-inserted armed
+  key. Place 4-real (against `/sync`) waits for step 4.
+- 2026-09-20: **Measured, correcting the spec's wording**: better-auth 1.4.19's exhausted per-key
+  limiter throws an APIError carrying no HTTP status. "401, not 429" is true only of the *raw*
+  throw — `lib/auth-errors.ts` is what turns it into an honest 429. That single classifier is the
+  difference between the agent halting forever and merely backing off, so it is load-bearing, not
+  cosmetic.
+- 2026-09-20: **§5.5's first-run claim cannot work as written**, three ways, all resolved in
+  `lib/bootstrap.ts`: (1) `user.create.before` runs before the row exists, so it has no id for the
+  `household_members` insert — split into `before` (role only) + `after` (the transaction);
+  (2) minting the `isService` user through better-auth would recurse *and* would not enlist in the
+  transaction — it is a raw drizzle insert, which fixes both; (3) A.21's "insert order" is a
+  non-problem, because `users` has no FK to `households`: generating both UUIDs client-side means
+  `service_user_id` is never transiently null.
+- 2026-09-20: **Did not seed the default windows**, despite §5.5. A `schedule_windows` row needs a
+  `policy_set` needs a non-null `child_id`, so seeding one demands inventing a child — exactly the
+  "hardcoded identity wearing a costume" §5.1 rule 4 forbids. Values are pinned as
+  `DEFAULT_SCHEDULE_WINDOWS` and applied when a real child is created. Chose `lock` over §4.3's
+  `shutdown`: a *default* that powers off a machine mid-homework is the wrong default.
+- 2026-09-20: **"Signup is closed" had no mechanism** in 2,612 lines — no flag, no column, no
+  config. Implemented as a middleware in front of the auth handler, because `disableSignUp` is
+  static at init and a database hook cannot tell a public sign-up from an admin `createUser`.
+  Owner-created parents (`/api/auth/admin/create-user`) still work.
+- 2026-09-20: Dropped `users.color`, `users.holiday_countries` and `users.receives_daily_digest`
+  (migration `0001_drop_homecal_user_columns`) — `homecal` calendar/digest columns with no meaning
+  here, and `holiday_countries` duplicated the real one on `households`. Owner's call.
 - 2026-09-18: Fixed two defects in the devkit-generated skills: `devkit-typecheck` and `devkit-test`
   used bare `pnpm tsc --noEmit` / `pnpm vitest run`, which in a turbo monorepo check nothing and
   find nothing respectively. Both now call the root turbo tasks.

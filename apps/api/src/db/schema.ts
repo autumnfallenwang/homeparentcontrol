@@ -40,28 +40,15 @@ export const users = pgTable("users", {
   email: text().notNull().unique(),
   emailVerified: boolean().notNull().default(false),
   image: text(),
-  // Inherited from homecal, where it is the calendar member-chip colour. This app
-  // has no calendar; kept for verbatim parity but given a default, because
-  // notNull() with no default makes the very first sign-up fail.
-  color: text().notNull().default("#6b7280"),
   role: text().notNull().default("user"),
   banned: boolean().default(false),
   banReason: text(),
   banExpires: timestamp({ withTimezone: true }),
-  // Phase 17: distinguishes "service accounts" (other apps calling HomeCal
-  // via API key) from real family members. Service accounts never appear in
-  // /api/users (the calendar member filter) and have a different UI surface
-  // under /admin?tab=services.
+  // A.21 — TRUE for the one-per-household machine identity that owns every
+  // device API key. Never signs in: no password, no `accounts` row, no session.
+  // It exists so `apikeys.userId` has an owner that outlives any human parent,
+  // because that column is NOT NULL ON DELETE CASCADE.
   isService: boolean().notNull().default(false),
-  // Phase 18 task 81: per-user holiday country preference. Null means "not
-  // set yet" — the API derives a default from the request's accept-language
-  // header and returns it transiently; the value is only persisted on PATCH.
-  holidayCountries: text().array(),
-  // Phase 21: whether this member receives the daily digest email. A plain
-  // column (like holidayCountries) managed by the admin /api/admin/digest route,
-  // not a Better Auth additionalField. Defaults on — the digest itself is off
-  // until an admin enables it, so auto-subscribing new members is harmless.
-  receivesDailyDigest: boolean().notNull().default(true),
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
 });
@@ -148,8 +135,10 @@ export const households = pgTable("households", {
   holidaysEnabled: boolean().notNull().default(true),
   // A.21 — device keys MUST hang off this user, not off a human parent. apikeys.userId is
   // NOT NULL ON DELETE CASCADE, so deleting a parent would otherwise silently revoke every Mac.
-  // NULLABLE on purpose: the first-run claim inserts the household and its isService user in
-  // one transaction, and the household row has to exist first.
+  // Nullable only because nothing forces otherwise — `users` has no FK back to `households`, so
+  // the first-run claim generates both UUIDs client-side and inserts the service user FIRST, with
+  // no UPDATE and no window in which this is null. A half-built household is still representable;
+  // `claimFirstHousehold()` is the only writer and it is transactional.
   serviceUserId: uuid().references(() => users.id, { onDelete: "restrict" }),
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),

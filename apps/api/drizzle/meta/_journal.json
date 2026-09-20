@@ -8,6 +8,13 @@
       "when": 1789881515893,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789882239666,
+      "tag": "0001_drop_homecal_user_columns",
+      "breakpoints": true
     }
   ]
 }
