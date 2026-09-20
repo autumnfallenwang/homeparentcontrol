@@ -15,6 +15,13 @@
       "when": 1789882239666,
       "tag": "0001_drop_homecal_user_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789886657002,
+      "tag": "0002_device_self_reported_reason",
+      "breakpoints": true
     }
   ]
 }

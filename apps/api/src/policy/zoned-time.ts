@@ -87,6 +87,16 @@ export function dateInZone(instant: Date, tz: string): string {
   }).format(instant);
 }
 
+/** The local wall-clock `HH:MM` that `instant` reads as in `tz`. */
+export function timeInZone(instant: Date, tz: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: tz,
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(instant);
+}
+
 /** Canonical weekday order — the DB CHECK's and the contract enum's, not §4.3's. */
 export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 

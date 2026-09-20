@@ -46,6 +46,58 @@ const ATTENDED_INTERVAL_MS = 5_000;
 /** How the cadence was chosen, for the log line. §4.2's four modes. */
 type Cadence = "base" | "boundary" | "attended";
 
+/**
+ * ⚠️ Thresholds the spec names a condition for and never gives a number to.
+ *
+ * §7.3 lists eight `DEGRADED` reasons; four of them (`disk_full`,
+ * `enforcement_failed`, `clock_untrusted`, `enforcer_heartbeat_missing`)
+ * appear at that one line and nowhere else in 2,612 lines — no wire field, no
+ * threshold, no prose. These are chosen here and are the kind of number that
+ * should be revisited against a real agent.
+ */
+const CLOCK_SKEW_LIMIT_MS = 60_000;
+/** Borrowed from `schedule_windows.escalate_after_failures`, which defaults to 3. */
+const EVAL_FAILURES_LIMIT = 3;
+/** 3 × the enforcer's unconditional 60 s tick. */
+const ENFORCER_HEARTBEAT_LIMIT_S = 180;
+
+/**
+ * What the agent is self-reporting as impaired, or null.
+ *
+ * ⚠️ Persisted on `devices` because the liveness job is a TIMER — it reads the
+ * database and never sees a sync body, so without this column §7.3's
+ * `DEGRADED` ("ticking normally, but self-reporting …") is uncomputable. The
+ * spec assumes one component does both jobs and never notices.
+ *
+ * Highest severity first; one reason wins. `health_reason` is free text, so
+ * the vocabulary is §7.3's rather than §4.6's conflicting
+ * `{policy_missing, policy_corrupt, policy_unverified}`.
+ *
+ * ⚠️ `disk_full` is one of §7.3's eight and is NOT computable: nothing on the
+ * wire carries free disk space. `queue.bytes` is queue size, not headroom.
+ */
+function selfReportedReason(body: SyncRequest): string | null {
+  if (body.agent.kill_switch != null) return "kill_switch_present";
+  if (body.policy_state.signature_valid === false) return "signature_invalid";
+  if (body.policy_state.using_lkg === true) return "policy_corrupt";
+  if (body.policy_state.etag == null && body.policy_state.policy_version == null) {
+    return "policy_missing";
+  }
+  if ((body.enforcement.consecutive_eval_failures ?? 0) >= EVAL_FAILURES_LIMIT) {
+    return "enforcement_failed";
+  }
+  if (body.agent.enforcer_health_age_s > ENFORCER_HEARTBEAT_LIMIT_S) {
+    return "enforcer_heartbeat_missing";
+  }
+  if (
+    body.clock.using_network_time === false ||
+    Math.abs(body.clock.skew_estimate_ms) > CLOCK_SKEW_LIMIT_MS
+  ) {
+    return "clock_untrusted";
+  }
+  return null;
+}
+
 export async function handleSync(c: Context): Promise<Response> {
   const deviceId = c.get("deviceId") as string;
 
@@ -96,6 +148,9 @@ export async function handleSync(c: Context): Promise<Response> {
       osVersion: body.device.os_version,
       arch: body.device.arch,
       appliedPolicyVersion: body.policy_state.policy_version ?? null,
+      // Read by the liveness job to decide DEGRADED. Sync owns this column;
+      // the liveness job owns health_state/reason/since. One writer each.
+      selfReportedReason: selfReportedReason(body),
       // "`enrolled` means credential issued, never seen; `active` means it has
       // actually ticked" (§5.5).
       ...(device.status === "enrolled" ? { status: "active" as const } : {}),

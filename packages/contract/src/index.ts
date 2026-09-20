@@ -17,4 +17,5 @@ export * from "./primitives.js";
 export * from "./problem.js";
 export * from "./registry.js";
 export * from "./sync.js";
+export * from "./telemetry.js";
 export * from "./version.js";

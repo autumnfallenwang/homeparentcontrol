@@ -211,6 +211,15 @@ export const devices = pgTable(
     osVersion: text(),
     arch: text(),
     appliedPolicyVersion: integer(),
+    // ⚠️ Written by the SYNC handler, read by the liveness job. §7.3's DEGRADED
+    //    condition is "ticking normally, but self-reporting <one of eight reasons>" —
+    //    and those reasons are only visible in a sync body, which the liveness job
+    //    (a timer, reading the database) never sees. Without this column DEGRADED is
+    //    uncomputable. The spec never notices; it assumes one component does both.
+    selfReportedReason: text(),
+    // Owned by the liveness job alone (§7.3). The sync handler must not write these:
+    // §5.2 says it does and §7.3 says a once-a-minute evaluation does, which would be
+    // two writers on two cadences. One writer per column.
     healthState: text().notNull().default("UNENROLLED"),
     healthReason: text(),
     healthSince: timestamp({ withTimezone: true }),

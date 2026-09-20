@@ -1,6 +1,6 @@
 ---
 name: 02-agent-enforcement-offline
-status: planned
+status: open
 opened: 2026-09-18
 ---
 

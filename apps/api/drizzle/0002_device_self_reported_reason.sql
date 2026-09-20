@@ -1,0 +1,1 @@
+ALTER TABLE "devices" ADD COLUMN "self_reported_reason" text;

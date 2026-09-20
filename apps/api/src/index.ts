@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { assertRetentionInvariant, assertSigningConfigured, config } from "./config.js";
+import { startJobs } from "./jobs/index.js";
 import { assertNoRateLimitedDeviceKeys } from "./lib/assert-x2.js";
 import { claimFirstHouseholdAtBoot } from "./lib/bootstrap.js";
 import { log } from "./lib/logger.js";
@@ -44,6 +45,10 @@ try {
   log.error({ event: "household.claim_error", err: (err as Error).message }, "claim check failed");
   process.exit(1);
 }
+
+// §5.8's three in-process jobs: liveness 60 s, projection 5 min, nightly.
+// ⚠️ Safe only because the chart pins `replicaCount: 1` + `strategy: Recreate`.
+startJobs();
 
 const app = createApp();
 

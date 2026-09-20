@@ -1,0 +1,374 @@
+import { randomUUID } from "node:crypto";
+import { asc, eq, sql } from "drizzle-orm";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { closeDb, db } from "../db/index.js";
+import {
+  children,
+  devices,
+  enforcementLog,
+  events,
+  households,
+  policySets,
+  projectionState,
+  sessionSpans,
+  usageDaily,
+  usageHourly,
+  users,
+} from "../db/schema.js";
+import { projectEvents, reprojectTrailing48h, rollUpDaily } from "./project.js";
+
+/**
+ * The projector (§5.7) against real Postgres. Almost every property that
+ * matters here — idempotency, the watermark, whole-bucket recompute — is only
+ * observable across two runs and a real `ON CONFLICT`.
+ */
+const hasDb = Boolean(process.env.DATABASE_URL);
+const d = hasDb ? describe : describe.skip;
+
+const HOUR = new Date("2026-09-20T21:00:00.000Z");
+const BOOT = "018f2a4c-0000-7000-8000-000000000001";
+
+interface Fixture {
+  householdId: string;
+  childId: string;
+  deviceId: string;
+}
+
+async function wipe(): Promise<void> {
+  await db.execute(
+    sql`TRUNCATE TABLE users, households, projection_state RESTART IDENTITY CASCADE`,
+  );
+}
+
+async function seed(tz = "America/New_York"): Promise<Fixture> {
+  const householdId = randomUUID();
+  const serviceUserId = randomUUID();
+  const childId = randomUUID();
+  const deviceId = randomUUID();
+
+  await db.insert(users).values({
+    id: serviceUserId,
+    name: "svc",
+    email: `svc+${householdId}@hpc.local`,
+    isService: true,
+  });
+  await db.insert(households).values({ id: householdId, name: "T", serviceUserId, timezone: tz });
+  await db.insert(children).values({ id: childId, householdId, displayName: "Lucy" });
+  await db.insert(policySets).values({ householdId, childId });
+  await db.insert(devices).values({ id: deviceId, householdId, childId, label: "Mac" });
+  return { householdId, childId, deviceId };
+}
+
+let seq = 0;
+async function emit(
+  f: Fixture,
+  type: string,
+  data: Record<string, unknown>,
+  at: Date = HOUR,
+): Promise<string> {
+  seq++;
+  const eventId = `018f2a4c-7b31-7c9e-9d2a-${seq.toString(16).padStart(12, "0")}`;
+  await db.insert(events).values({
+    householdId: f.householdId,
+    deviceId: f.deviceId,
+    eventId,
+    type,
+    v: 1,
+    class: type.startsWith("app.") ? "sample" : "audit",
+    ts: at,
+    bootId: BOOT,
+    seq,
+    data,
+  });
+  return eventId;
+}
+
+beforeEach(async () => {
+  if (hasDb) await wipe();
+  seq = 0;
+});
+afterAll(async () => {
+  if (hasDb) {
+    await wipe();
+    await closeDb();
+  }
+});
+
+d("projector — usage_hourly", () => {
+  it("sums per bundle into one row per (device, hour, bundle)", async () => {
+    const f = await seed();
+    await emit(f, "app.usage_sample", {
+      bundle_id: "com.apple.Safari",
+      foreground_s: 60,
+      active_s: 55,
+      cpu_pct: 3,
+    });
+    await emit(f, "app.usage_sample", {
+      bundle_id: "com.apple.Safari",
+      foreground_s: 60,
+      active_s: 50,
+      cpu_pct: 5,
+    });
+    await emit(f, "app.usage_sample", {
+      bundle_id: "com.mojang.minecraft",
+      foreground_s: 60,
+      active_s: 60,
+      cpu_pct: 40,
+    });
+
+    await projectEvents();
+
+    const rows = await db
+      .select()
+      .from(usageHourly)
+      .where(eq(usageHourly.deviceId, f.deviceId))
+      .orderBy(asc(usageHourly.bundleId));
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.bundleId).toBe("com.apple.Safari");
+    expect(rows[0]?.foregroundS).toBe(120);
+    expect(rows[0]?.activeS).toBe(105);
+    // Unweighted mean of 3 and 5, in basis points.
+    expect(rows[0]?.cpuPctAvg).toBe(400);
+    expect(rows[0]?.sampleCount).toBe(2);
+  });
+
+  /** §5.7: "Recomputing rather than incrementing is the whole design." */
+  it("is idempotent — running twice does not double the numbers", async () => {
+    const f = await seed();
+    await emit(f, "app.usage_sample", {
+      bundle_id: "com.apple.Safari",
+      foreground_s: 60,
+      active_s: 60,
+    });
+
+    await projectEvents();
+    await projectEvents({ since: new Date(0) }); // force a re-scan
+
+    const rows = await db.select().from(usageHourly).where(eq(usageHourly.deviceId, f.deviceId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.foregroundS).toBe(60);
+  });
+
+  /**
+   * ⚠️ Upsert alone is not a recompute. A bundle that vanishes from the
+   * recomputed set must vanish from the bucket, or the row survives with its
+   * old numbers and the bucket over-reports for ever.
+   */
+  it("drops a bundle whose events are gone", async () => {
+    const f = await seed();
+    await emit(f, "app.usage_sample", { bundle_id: "com.apple.Safari", foreground_s: 60 });
+    await emit(f, "app.usage_sample", { bundle_id: "com.gone.app", foreground_s: 60 });
+    await projectEvents();
+    expect(
+      await db.select().from(usageHourly).where(eq(usageHourly.deviceId, f.deviceId)),
+    ).toHaveLength(2);
+
+    await db.delete(events).where(eq(events.type, "app.usage_sample"));
+    await emit(f, "app.usage_sample", { bundle_id: "com.apple.Safari", foreground_s: 60 });
+    await projectEvents({ since: new Date(0) });
+
+    const rows = await db.select().from(usageHourly).where(eq(usageHourly.deviceId, f.deviceId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.bundleId).toBe("com.apple.Safari");
+  });
+
+  it("skips an unprojectable sample without failing the pass", async () => {
+    // R8 — it is already stored and stays stored; it just contributes nothing.
+    const f = await seed();
+    await emit(f, "app.usage_sample", { no_bundle_id: true });
+    await emit(f, "app.usage_sample", { bundle_id: "com.apple.Safari", foreground_s: 60 });
+
+    const result = await projectEvents();
+    expect(result.unprojectable).toBe(1);
+    expect(
+      await db.select().from(usageHourly).where(eq(usageHourly.deviceId, f.deviceId)),
+    ).toHaveLength(1);
+    expect(await db.select().from(events)).toHaveLength(2); // both still stored
+  });
+});
+
+d("projector — the watermark", () => {
+  it("advances past what it processed", async () => {
+    const f = await seed();
+    await emit(f, "app.usage_sample", { bundle_id: "a", foreground_s: 1 });
+    await projectEvents();
+
+    const [state] = await db.select().from(projectionState);
+    expect(state?.watermarkReceivedAt.getTime()).toBeGreaterThan(0);
+  });
+
+  it("does not reprocess what it has already seen", async () => {
+    const f = await seed();
+    await emit(f, "app.usage_sample", { bundle_id: "a", foreground_s: 1 });
+    await projectEvents();
+
+    const second = await projectEvents();
+    expect(second.scanned).toBe(0);
+    expect(second.dirtyBuckets).toBe(0);
+  });
+
+  it("picks up events that arrive after the last run", async () => {
+    const f = await seed();
+    await emit(f, "app.usage_sample", { bundle_id: "a", foreground_s: 1 });
+    await projectEvents();
+
+    await emit(f, "app.usage_sample", { bundle_id: "b", foreground_s: 2 });
+    const second = await projectEvents();
+    expect(second.scanned).toBeGreaterThan(0);
+    expect(
+      await db.select().from(usageHourly).where(eq(usageHourly.deviceId, f.deviceId)),
+    ).toHaveLength(2);
+  });
+
+  /** ⚠️ The nightly pass must be a pure side-pass — rewinding breaks monotonicity. */
+  it("the 48-hour re-projection does NOT rewind the watermark", async () => {
+    const f = await seed();
+    await emit(f, "app.usage_sample", { bundle_id: "a", foreground_s: 1 });
+    await projectEvents();
+    const [before] = await db.select().from(projectionState);
+
+    await reprojectTrailing48h();
+
+    const [after] = await db.select().from(projectionState);
+    expect(after?.watermarkReceivedAt.getTime()).toBe(before?.watermarkReceivedAt.getTime());
+  });
+});
+
+d("projector — enforcement_log", () => {
+  it("turns audit events into rows, idempotently", async () => {
+    const f = await seed();
+    await emit(f, "enforcement.action_taken", { action: "lock" });
+    await emit(f, "queue.evicted", { count: 42 });
+
+    await projectEvents();
+    await projectEvents({ since: new Date(0) });
+
+    const rows = await db
+      .select()
+      .from(enforcementLog)
+      .where(eq(enforcementLog.deviceId, f.deviceId))
+      .orderBy(asc(enforcementLog.kind));
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.kind).sort()).toEqual(["action_taken", "queue_evicted"]);
+  });
+
+  it("composes a human summary at projection time", async () => {
+    const f = await seed();
+    await emit(f, "enforcement.action_taken", { action: "shutdown" });
+    await projectEvents();
+    const [row] = await db
+      .select()
+      .from(enforcementLog)
+      .where(eq(enforcementLog.deviceId, f.deviceId));
+    expect(row?.summary).toBe("Enforced: shutdown");
+  });
+
+  /** §5.7's first honesty rule: gaps are data. */
+  it("records an eviction as a first-class row", async () => {
+    const f = await seed();
+    await emit(f, "queue.evicted", { count: 900 });
+    await projectEvents();
+    const [row] = await db
+      .select()
+      .from(enforcementLog)
+      .where(eq(enforcementLog.deviceId, f.deviceId));
+    expect(row?.kind).toBe("queue_evicted");
+    expect(row?.summary).toContain("900");
+  });
+
+  it("ignores a type with no mapped kind, and keeps the event", async () => {
+    const f = await seed();
+    await emit(f, "something.unmapped", { x: 1 });
+    await projectEvents();
+    expect(await db.select().from(enforcementLog)).toHaveLength(0);
+    expect(await db.select().from(events)).toHaveLength(1);
+  });
+});
+
+d("projector — session_spans", () => {
+  it("turns transitions into spans closed by the next one", async () => {
+    const f = await seed();
+    await emit(f, "session.state", { state: "awake" }, new Date("2026-09-20T21:05:00.000Z"));
+    await emit(f, "session.state", { state: "locked" }, new Date("2026-09-20T21:40:00.000Z"));
+
+    await projectEvents();
+
+    const rows = await db
+      .select()
+      .from(sessionSpans)
+      .where(eq(sessionSpans.deviceId, f.deviceId))
+      .orderBy(asc(sessionSpans.startedAt));
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.kind).toBe("awake");
+    expect(rows[0]?.endedAt?.toISOString()).toBe("2026-09-20T21:40:00.000Z");
+    expect(rows[1]?.endedAt).toBeNull(); // still open
+  });
+
+  /** ⚠️ A shifted start must not orphan the old row. */
+  it("clears the bucket's spans before rewriting", async () => {
+    const f = await seed();
+    await emit(f, "session.state", { state: "awake" }, new Date("2026-09-20T21:05:00.000Z"));
+    await projectEvents();
+
+    await db.delete(events).where(eq(events.type, "session.state"));
+    await emit(f, "session.state", { state: "awake" }, new Date("2026-09-20T21:06:00.000Z"));
+    await projectEvents({ since: new Date(0) });
+
+    const rows = await db.select().from(sessionSpans).where(eq(sessionSpans.deviceId, f.deviceId));
+    expect(rows, "the 21:05 span must be gone, not orphaned").toHaveLength(1);
+    expect(rows[0]?.startedAt.toISOString()).toBe("2026-09-20T21:06:00.000Z");
+  });
+});
+
+d("rollup — usage_daily", () => {
+  /**
+   * ★ "LOCAL day in policy.timezone, NOT date_trunc('day', ts) in UTC. Get
+   * this wrong and Sunday evening shows up on Monday."
+   */
+  it("buckets by LOCAL day, not UTC", async () => {
+    const f = await seed("America/New_York");
+    // 2026-09-21T01:00Z is still Sunday the 20th in New York.
+    await emit(
+      f,
+      "app.usage_sample",
+      { bundle_id: "a", foreground_s: 60 },
+      new Date("2026-09-21T01:00:00.000Z"),
+    );
+
+    await projectEvents();
+    await rollUpDaily();
+
+    const [row] = await db.select().from(usageDaily).where(eq(usageDaily.deviceId, f.deviceId));
+    expect(row?.localDay).toBe("2026-09-20");
+  });
+
+  it("uses the child's zone over the household's — A.30", async () => {
+    const f = await seed("America/New_York");
+    await db.update(children).set({ timezone: "Asia/Taipei" }).where(eq(children.id, f.childId));
+    // 2026-09-21T01:00Z is already Monday the 21st in Taipei.
+    await emit(
+      f,
+      "app.usage_sample",
+      { bundle_id: "a", foreground_s: 60 },
+      new Date("2026-09-21T01:00:00.000Z"),
+    );
+
+    await projectEvents();
+    await rollUpDaily();
+
+    const [row] = await db.select().from(usageDaily).where(eq(usageDaily.deviceId, f.deviceId));
+    expect(row?.localDay).toBe("2026-09-21");
+  });
+
+  it("is idempotent", async () => {
+    const f = await seed();
+    await emit(f, "app.usage_sample", { bundle_id: "a", foreground_s: 60, active_s: 60 });
+    await projectEvents();
+    await rollUpDaily();
+    await rollUpDaily();
+
+    const rows = await db.select().from(usageDaily).where(eq(usageDaily.deviceId, f.deviceId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.foregroundS).toBe(60);
+  });
+});

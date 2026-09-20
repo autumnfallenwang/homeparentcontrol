@@ -1,6 +1,6 @@
 ---
 name: 01-control-plane-local
-status: open
+status: done
 opened: 2026-09-18
 ---
 
@@ -33,8 +33,11 @@ prune.
 
 ## Exit criteria
 
-- [ ] `curl` can enrol a fake device, fetch a signed policy, post events, and read them back
-      projected — **entirely on a laptop, no cluster**
+- [x] `curl` can enrol a fake device, fetch a signed policy, post events, and read them back
+      projected — **entirely on a laptop, no cluster**. Verified end to end 2026-09-20: enrol →
+      201 + JWK · `GET /policy` → JWS that verifies against only that JWK · 7 events → 202 ·
+      projector → `usage_hourly`, `usage_daily` (local day), `enforcement_log` with human
+      summaries, `session_spans` with an open span
 - [x] Policy compiler golden-file suite passes; the compiler is a pure function that emits nothing
       when the content hash is unchanged
 - [x] `lint`, `typecheck` and `test` all green via the `devkit-*` skills
@@ -153,6 +156,57 @@ Argo CD, Loki, alerting). The 11 cluster verifications stay blocked until k3s is
   Loki-specific code**; **C6 ❌ there is no alerting in the cluster at all** — no rules, no contact
   points, no notifiers, and the three live apps have none either. Recorded in
   [[arch-cluster-access]] and reflected in milestone 05.
+- 2026-09-20: **Phase 2 step 5 shipped — projection, rollups, prune, three schedulers. MILESTONE
+  COMPLETE.** The projector recomputes whole device-hours on a `received_at` watermark; rollups
+  land in local-day buckets; the liveness job owns the five-state machine; the nightly pass
+  re-projects 48 h, prunes the ladder and rolls the policy horizon.
+- 2026-09-20: 🔴 **Two silent bugs the tests caught, both mine, both invisible in production.**
+  (1) The watermark round-tripped through a JS `Date`, which has millisecond precision while
+  Postgres `timestamptz` has microseconds — so the stored watermark landed fractionally *before*
+  the row it came from and `received_at > watermark` re-matched that row for ever. The projector
+  is idempotent, so nothing would have corrupted; it would simply never have advanced past its
+  newest rows, re-doing unbounded work as rising CPU. Both the read and the write now go through
+  `::text` at full precision. (2) A full 50,000-row batch could cut *inside* a group sharing one
+  `received_at` — and `now()` is the TRANSACTION timestamp, so every row of one batch insert
+  shares one. The strict `>` then skipped the remainder permanently. The trailing partial group is
+  now deferred to the next run.
+- 2026-09-20: **`DEGRADED` was uncomputable as specified.** §7.3 wants a once-a-minute job to read
+  eight self-reported conditions; §4.2 says they arrive on `/sync`; the sync handler persisted none
+  of them, and a timer reading the database never sees a request body. Added
+  `devices.self_reported_reason` (migration 0002), written by sync, read by liveness — one writer
+  each, which keeps F2's single-writer ruling intact. ⚠️ `disk_full` remains **unimplementable**:
+  nothing on the wire carries free disk space, and `queue.bytes` is queue size, not headroom.
+  Thresholds for `clock_untrusted` (60 s skew), `enforcement_failed` (3, borrowed from
+  `escalate_after_failures`) and `enforcer_heartbeat_missing` (180 s = 3 ticks) are all invented —
+  the spec names the conditions and gives no numbers.
+- 2026-09-20: **§7.3 gives five overlapping states and no evaluation order.** Invented and pinned by
+  test. ⚠️ `away_until` beats `SILENT_TOO_LONG` even though §7.3 says that state fires
+  "regardless" — A.19/X6 says `away_until` exists precisely "so a school holiday cannot make
+  SILENT_TOO_LONG fire benignly and get the channel muted", and a stated purpose beats a loose
+  adverb. ⚠️ There is also a genuine **hole between 180 s and 10 minutes** that no row covers; the
+  job holds the current state there rather than flapping.
+- 2026-09-20: **Suppressed the overnight false amber.** §3.8 says the `agent.stopping` that would
+  explain a nightly shutdown is routinely lost ("do not build the design on the dying breath
+  arriving"), and §7.3's *state* rule requires an expected-online window while its *notification*
+  rule does not restate it. Left alone, every night buzzes a phone at 1 a.m. The notification is
+  now window-scoped.
+- 2026-09-20: **§7.4 reclassification implemented for row 1 only, deliberately.** Rows 2–4 need the
+  *previous* `system_boot_time`, which sync has already overwritten and `agent_status_intervals`
+  has no column for — and §7.4 asks for those to be surfaced on the health card, not as
+  notifications, which is what the `agent_stopped_while_up` tripwire already does from inside sync
+  where both values are in scope.
+- 2026-09-20: **Defined the event `data` shapes the projector reads** (`packages/contract/src/telemetry.ts`).
+  R8 leaves `data` opaque on purpose and ingest still stores anything, but a projection must
+  interpret *something* and no event's payload is defined anywhere in the spec. Read tolerantly: an
+  event that does not match is stored, counted as unprojectable, and reinterpretable later with no
+  migration.
+- 2026-09-20: ⚠️ **Two gaps recorded, not closed.** `telemetry.collect`'s default globs exclude
+  `agent.*`, `clock.*`, `queue.*`, `policy.*` and `override.*` — an agent obeying its own policy
+  would starve 8 of `enforcement_log`'s 14 kinds and never send the `agent.stopping` that
+  `EXPECTED_OFFLINE` depends on. Either the default is wrong or `class: audit` bypasses `collect`;
+  phase 3 must resolve it before the Swift agent ships. And `enforcement_log.unique(event_id)` is
+  stricter than `events`' own `(device_id, event_id)` key — harmless at UUIDv7 odds, cheap to fix
+  now, expensive later.
 - 2026-09-20: ✅ **B4 CLOSED, and closed properly.** better-auth 1.4.19 not only accepts §5.9's
   `permissions: { device: ["sync", "policy:read", "events:write"] }` shape — it round-trips it
   through `verifyApiKey` and genuinely **enforces** it (an ungranted permission returns
@@ -336,3 +390,31 @@ Argo CD, Loki, alerting). The 11 cluster verifications stay blocked until k3s is
 - 2026-09-18: Fixed two defects in the devkit-generated skills: `devkit-typecheck` and `devkit-test`
   used bare `pnpm tsc --noEmit` / `pnpm vitest run`, which in a turbo monorepo check nothing and
   find nothing respectively. Both now call the root turbo tasks.
+
+## Outcome
+
+**Closed 2026-09-20.** The control plane runs end to end on a laptop: a device enrols with a
+one-time code, receives an Ed25519-signed policy it can verify against a key handed over at
+enrolment, ticks, posts telemetry, and has that telemetry projected into usage, enforcement and
+session history. 349 tests, `lint`/`typecheck`/`test` green, migrations verified from an empty
+database.
+
+**What actually took the time was not writing code.** Every section of the spec larger than about
+fifty lines contained at least one thing that could not be implemented as written: §5.5's bootstrap
+hook had no user id, §5.6's churn-killer was dead code, §4.7 made `decommission` reachable without
+a credential, §7.3's `DEGRADED` had no inputs in the database. None of these were ambiguities to
+interpret; they were instructions that would not run. The working method that emerged — treat the
+document as a hypothesis, resolve each contradiction explicitly, and record the ruling next to the
+code rather than in a doc nobody re-reads — is the thing to carry into milestone 02.
+
+**Four bugs were caught by tests that nearly did not exist**, all silent in production: an
+`attempts` counter rolled back by the transaction it was recording a failure for; an
+`accepted_event_ids` that would have made the agent re-send for ever; a watermark that could never
+advance past its own newest row; and a batch boundary that dropped events sharing a timestamp. The
+habit of deliberately breaking a gate to watch it fail — captured as [[falsify-the-gate]] — earned
+its place three separate times.
+
+**Carried into later milestones:** no rotation channel for the signing key (delivered only at
+enrolment, which an enrolled agent never repeats); `telemetry.collect`'s defaults starve the
+projector; `disk_full` is unimplementable as a `DEGRADED` reason; and C6 — there is still no
+alerting anywhere in the cluster, so "notified" currently means "logged".
