@@ -73,5 +73,21 @@ shutdown on the Mac mini (06)**.
   and §3.3's wording is a standing Invariant E violation: a child who can make warnings fail (Focus,
   killing the notifier, no console user) would otherwise defeat bedtime entirely. The ladder is
   being built to X10.
+- 2026-09-20: **The enforcement ladder, built to X10 and X9, with 57 tests.** Pure state machine —
+  it emits effects and never touches the machine — so every branch can be interrogated with the
+  standing test. The headline guard is an exhaustive sweep: across every combination of warning
+  outcome, breaker state, failure count and delivery history, **a restricted window must produce a
+  lock**. If that property ever goes false, bedtime is bypassable.
+- 2026-09-20: **Escalation and enforcement are separated exactly as X10 requires.** The lock is
+  unconditional and nothing above it may gate it. Shutdown is gated on three things — grace elapsed,
+  at least one warning actually *delivered*, breaker not tripped — because "shutdown without notice
+  destroys work, and that is the one thing D.3 exists to prevent". `noConsoleUser` is a third case
+  beside `delivered`/`failed`, since X10 says conflating "nobody to warn" with "warning failed" is
+  how the lever got written in the first place.
+- 2026-09-20: 🟠 **A second bug caught by test, milder but user-visible.** The episode reset ran on
+  every unrestricted tick, including the half-hour before bedtime where warnings live — so each
+  warning re-fired every 60 seconds: **thirty modal dialogs instead of four**, which is how a child
+  learns to ignore them. Warnings are now keyed to the boundary they belong to, which also fixes the
+  converse: "already warned at T-30" surviving into the next night and suppressing it.
 - 2026-09-18: Opened. Warnings and `CFUserNotification` with a masked text field are already proven
   on this hardware, including from a root daemon via the `asuser` bridge.

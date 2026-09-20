@@ -10,7 +10,7 @@ import Foundation
 /// ⚠️ Wall-clock time of day, **never elapsed time**. "She has had two hours"
 /// is a budget (D.4, deliberately unbuilt); "it is after 21:30" is a bedtime.
 /// Only the second one is here.
-public enum Predicate {
+public enum BedtimePredicate {
 
     /// What the tick concluded, and everything the ladder needs to act.
     public struct Evaluation: Equatable, Sendable {
