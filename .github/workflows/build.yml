@@ -41,6 +41,14 @@ jobs:
       # the runner does not ship.
       - run: pnpm test:fast
 
+      # R9: the Swift agent consumes packages/contract/contract.schema.json.
+      # Regenerate and fail if it differs from what was committed, so a schema
+      # change can never silently ship without the artefact the agent reads.
+      - name: contract artefact is current
+        run: |
+          pnpm --filter @hpc/contract emit
+          git diff --exit-code -- packages/contract/contract.schema.json
+
 # 🛑 DELIBERATELY NO DEPLOY JOBS.
 #
 # `build-and-deploy` and `bump-arch-infra` land in phase 5, not before. Adding

@@ -6,6 +6,15 @@
 // evolves later" from becoming "every payload change is a migration".
 //
 // R1: never call .strict() on anything in this package. Both ends must tolerate
-// unknown fields — zod's .parse() already strips them.
+// unknown fields — zod's .parse() already strips them. Enforced by emit.test.ts,
+// not by a lint rule: biome has no noRestrictedSyntax.
 
+export * from "./emit.js";
+export * from "./enrolment.js";
+export * from "./events.js";
+export * from "./policy.js";
+export * from "./primitives.js";
+export * from "./problem.js";
+export * from "./registry.js";
+export * from "./sync.js";
 export * from "./version.js";

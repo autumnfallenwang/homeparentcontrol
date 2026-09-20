@@ -11,6 +11,7 @@
       "!**/.turbo",
       "!**/drizzle",
       "!**/*.gen.ts",
+      "!**/contract.schema.json",
       "!**/components/ui",
       "!**/.devkit",
       "!**/settings.local.json"

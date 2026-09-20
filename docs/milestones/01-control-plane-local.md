@@ -102,6 +102,26 @@ Argo CD, Loki, alerting). The 11 cluster verifications stay blocked until k3s is
   hides it; k8s creates a new container per pod restart, so it would crashloop during an npm outage.
   Fixed with `COREPACK_HOME` + chown. **`homework` and `homecal` ship the same unpatched file.**
   Captured as [[corepack-runtime-download]].
+- 2026-09-20: **Phase 1 complete.** `packages/contract` defines the wire format — sync request and
+  response, the policy document, the events envelope, `problem+json` + the eight `hpc_action`
+  values, and the enrolment/health pair. 54 tests. A JSON-Schema artefact
+  (`contract.schema.json`, 10 schemas) is emitted for the Swift agent and CI fails if it drifts
+  from the schemas.
+- 2026-09-20: ⚠️ **Two spec instructions could not be followed as written, both now handled.**
+  (1) `z.toJSONSchema()` emits `additionalProperties: false` by default, which would have told a
+  generated Swift decoder to **reject** unknown fields — the exact failure R1 exists to prevent,
+  and invisible from the TypeScript side because the zod schemas stay tolerant. Fixed with
+  `io: "input"` and guarded by a test that walks the artefact. (2) R1 asks for `.strict()` to be
+  "banned by lint rule"; biome has no `noRestrictedSyntax`, so the artefact guard replaces it —
+  it tests the effect rather than one syntax, and recurses through everything on the wire.
+- 2026-09-20: `event_id` uses the spec's **literal lowercase UUIDv7 regex**, not
+  `z.uuid({ version: "v7" })`. Zod's helper is case-insensitive and would accept uppercase that
+  X5 says must be **rejected, not normalised**. Caught while verifying the plan's own assumption.
+- 2026-09-20: **9 wire shapes are undefined in the spec** — most importantly the entire
+  `POST /enroll` request body, plus `rejected_events[]` elements, the `desired[]` item spec,
+  `policy_signing_keys[]`, and five sync-request enums with one example value each. Modelled
+  conservatively as open/opaque with TODOs rather than invented, since R2 forbids renaming later.
+  Applied X11 (no `fail_mode`) and X12 (`shutdown_grace_s` min 60) over §4.3, which predates both.
 - 2026-09-20: **Cluster surveyed from the Mac** — k3s v1.35.4 up 133 d, Argo CD healthy, GitOps chain
   proven (`homework`'s pinned tag == its repo HEAD). Two of T6's eleven cluster verifications
   resolved: **C2 ✅ Alloy already scrapes pod stdout cluster-wide, so the control plane needs zero

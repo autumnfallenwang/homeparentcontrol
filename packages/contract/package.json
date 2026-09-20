@@ -10,16 +10,19 @@
   },
   "scripts": {
     "build": "tsc --noEmit",
-    "typecheck": "tsc --noEmit",
+    "emit": "tsx src/emit-cli.ts",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
     "test": "vitest run",
     "test:fast": "vitest run --exclude '**/*.integration.test.ts'",
-    "lint": "biome check .",
-    "lint:fix": "biome check --write ."
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/node": "^25.2.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   }
