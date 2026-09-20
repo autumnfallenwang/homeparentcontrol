@@ -99,10 +99,19 @@ public enum QueuePolicy {
         /// Delete everything in this class older than here, regardless of count.
         public let olderThan: Date?
         public let reason: String
+
+        public init(cls: Class, rows: Int, olderThan: Date?, reason: String) {
+            self.cls = cls
+            self.rows = rows
+            self.olderThan = olderThan
+            self.reason = reason
+        }
     }
 
     public struct Plan: Equatable, Sendable {
         public let evictions: [Eviction]
+
+        public init(evictions: [Eviction]) { self.evictions = evictions }
         public var isEmpty: Bool { evictions.allSatisfy { $0.rows == 0 && $0.olderThan == nil } }
     }
 

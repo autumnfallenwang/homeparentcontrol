@@ -159,7 +159,6 @@ struct PolicyStoreTests {
     }
 }
 
-extension PolicyStore.LoadFailure: @retroactive Equatable {}
 extension Result: @retroactive Equatable where Success == PolicyStore.Loaded, Failure == PolicyStore.LoadFailure {
     public static func == (lhs: Self, rhs: Self) -> Bool {
         switch (lhs, rhs) {

@@ -12,10 +12,10 @@
 # that and watching it go red. So this proves "no network CAPABILITY", not "no
 # import", which is the property that actually matters.
 #
-# ⚠️ Milestone 03 widened this from one binary to three. The half that makes
-# it a real check — asserting that `HPCSync` FAILS the same test, so a detector
-# that has silently stopped detecting cannot masquerade as three passes —
-# lands with the sync daemon itself.
+# ⚠️ Milestone 03 widened this from one binary to three, and added the half
+# that makes it a real check: `HPCSync` is asserted to FAIL the same test. A
+# detector that has silently stopped detecting would otherwise masquerade as
+# three passes, and three vacuous passes read exactly like three real ones.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -59,5 +59,21 @@ for name in "${OFFLINE[@]}"; do
 
   echo "  PASS — no networking libraries, no networking symbols"
 done
+
+# ── The control. A.4: "the sync daemon is the only component that talks to the
+# control plane API", so HPCSync MUST trip the detector that the others must
+# not. If this ever passes, the detector has stopped working and every PASS
+# above is worthless.
+echo "checking HPCSync — must be ONLINE (this is the control)"
+if otool -L "$BIN_DIR/HPCSync" | tail -n +2 | grep -qE "$DENY" \
+  || nm -u "$BIN_DIR/HPCSync" 2>/dev/null | grep -qiE "$SYMBOLS"; then
+  echo "  PASS — the sync daemon does link networking, so the check discriminates"
+else
+  echo "  FAIL — HPCSync shows NO networking symbols."
+  echo "         Either the sync daemon lost its client, or this check has"
+  echo "         stopped detecting anything. Every PASS above is void until"
+  echo "         you know which."
+  fails=1
+fi
 
 exit "$fails"

@@ -54,6 +54,12 @@ public enum DesiredReconciler {
         public let desiredId: String
         public let status: String
         public let detail: String?
+
+        public init(desiredId: String, status: String, detail: String?) {
+            self.desiredId = desiredId
+            self.status = status
+            self.detail = detail
+        }
     }
 
     public struct Outcome: Equatable, Sendable {
