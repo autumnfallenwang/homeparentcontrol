@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.hpc.supervisor</string>
+
+    <!-- ⚠️ A.24 — FIXED PATH, and the supervisor never self-updates. It is
+         the one component that cannot be rolled back in place, so a bump is
+         an attended install of the pkg, a couple of times a year. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/libexec/hpc-supervisor</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardErrorPath</key>
+    <string>/var/log/homeparentcontrol/supervisor.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

@@ -33,5 +33,15 @@ jobs:
       # The V-series itself cannot run here — it needs a root LaunchDaemon and
       # deliberately locks and powers off the machine. This job proves the one
       # part of that claim a runner CAN prove.
-      - name: the enforcer cannot reach the network
+      # ⚠️ Three binaries must show NO networking, and HPCSync must show
+      # some. The second half is what makes the first meaningful: three
+      # vacuous passes read exactly like three real ones, so the script
+      # asserts the detector can still tell them apart.
+      - name: enforcement cannot reach the network, and the check can tell
         run: ./agent/scripts/check-no-networking.sh
+
+      # The generated deadfall plist has to be a plist launchd will load. A
+      # malformed one fails silently at `bootstrap` time, on the child's Mac,
+      # and the first symptom is a bedtime that did not happen.
+      - name: the generated deadfall plist parses
+        run: swift test --package-path agent --filter "DeadfallScheduleTests"

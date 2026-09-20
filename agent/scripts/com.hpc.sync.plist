@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.hpc.sync</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/libexec/hpc-sync</string>
+    </array>
+
+    <!-- ⚠️ A SEPARATE job from the enforcer, and that separation is the whole
+         claim. V6 boots this out and requires byte-identical enforcer logs.
+         Nothing here may become a dependency of com.hpc.enforcerd: no
+         `KeepAlive` on another job, no shared pid, no ordering. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- The daemon owns its own cadence (§4.2's one timer), so launchd must
+         not also have an opinion. No StartInterval. -->
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- Set by the installer. Plain HTTP is X4, accepted. -->
+        <key>HPC_BASE_URL</key>
+        <string>http://hpc.local/api/agent/v1/</string>
+    </dict>
+
+    <key>StandardErrorPath</key>
+    <string>/var/log/homeparentcontrol/sync.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

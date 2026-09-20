@@ -142,6 +142,16 @@ public enum SyncDaemon {
 
         apply(response: response, client: client, queue: queue)
 
+        // ── 4b. Rotate on the clock, not only on request.
+        //
+        // ⚠️ `rotate_after` is returned by enrolment and by every rotation,
+        // and NOTHING in the design document ever acts on it — §4.5 names
+        // `credential` as a desired kind and leaves its spec undefined, so
+        // the only documented trigger is a row a parent's UI would have to
+        // create, and that UI is milestone 04. A credential that renews only
+        // when someone remembers to ask is a credential that never renews.
+        rotateIfDue(client)
+
         // ── 5. Telemetry, on its own schedule. A.27.
         flushEventsIfDue(client, queue)
 
@@ -206,8 +216,13 @@ public enum SyncDaemon {
 
     // MARK: - The request body
 
-    static func syncBody(_ queue: Queue) -> [String: Any] {
-        let identity = DeviceState.loadIdentity()
+    /// `identity` is a parameter rather than a read, so the body can be
+    /// assembled without `/var/db/homeparentcontrol` existing — the
+    /// end-to-end suite runs as an ordinary user and would otherwise send
+    /// `device_id: ""` and get a 400 it could not explain.
+    static func syncBody(
+        _ queue: Queue, identity: DeviceState.Identity? = DeviceState.loadIdentity()
+    ) -> [String: Any] {
         let census = (try? queue.census()) ?? .init()
         let enforcer = readEnforcerHealth()
         let policy = loadedPolicy()
@@ -383,6 +398,21 @@ public enum SyncDaemon {
 
     // MARK: - Credential rotation
 
+    /// Rotate once `rotate_after` has passed, at most once per tick.
+    ///
+    /// ⚠️ A failed rotation is not an error worth escalating: the old
+    /// credential is valid for another 24 h by construction, and the next
+    /// tick tries again. What must never happen is a rotation *loop* — hence
+    /// the server's 409 on a second rotation inside an open window, which
+    /// arrives here as a plain failure and changes nothing.
+    static func rotateIfDue(_ client: Client) {
+        guard let credential = DeviceState.loadCredential(),
+              let rotateAfter = credential.rotateAfter,
+              rotateAfter <= Date()
+        else { return }
+        rotate(client, desiredId: "")
+    }
+
     /// ⚠️ **The old token stays on disk until the new one has been used.**
     ///
     /// The server keeps both valid for 24 h, so the failure this guards is not
@@ -407,8 +437,12 @@ public enum SyncDaemon {
                         .flatMap(ISO8601DateFormatter.hpcParse),
                     previousToken: current.token))
             client.updateToken(token)
-            pendingReports.append(
-                .init(desiredId: desiredId, status: "converged", detail: nil))
+            // An empty id means we rotated on the clock rather than because
+            // the server asked; there is nothing to report converged.
+            if !desiredId.isEmpty {
+                pendingReports.append(
+                    .init(desiredId: desiredId, status: "converged", detail: nil))
+            }
             enqueueLocal(type: "agent.credential_rotated", cls: .audit, data: [:])
         } catch {
             // Not terminal: the old credential is still valid for 24 h and the
@@ -496,10 +530,12 @@ public enum SyncDaemon {
         }
     }
 
-    static func eventsBody(_ rows: [Queue.Row]) -> [String: Any] {
+    static func eventsBody(
+        _ rows: [Queue.Row], identity: DeviceState.Identity? = DeviceState.loadIdentity()
+    ) -> [String: Any] {
         [
             "contract": 1,
-            "device_id": DeviceState.loadIdentity()?.deviceId ?? "",
+            "device_id": identity?.deviceId ?? "",
             "boot_id": bootId,
             "events": rows.map { row in
                 var event: [String: Any] = [
