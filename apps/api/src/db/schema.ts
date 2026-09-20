@@ -201,6 +201,18 @@ export const devices = pgTable(
     // still enforcing.  pending | enrolled | active | revoked | decommissioned
     status: text().notNull().default("pending"),
     apiKeyId: uuid().references(() => apikeys.id, { onDelete: "set null" }),
+    // ⚠️ Credential rotation's 24 h overlap (milestone 03). The OLD key keeps
+    // working until `previousApiKeyExpiresAt`, because the failure this
+    // guards is not the server's — it is a power cut between "server issued a
+    // new token" and "agent wrote it to disk". Without an overlap that device
+    // has no valid credential and has to be re-enrolled by hand, on site.
+    //
+    // The nightly job disables the row once the window closes; see
+    // `jobs/nightly.ts`. Nothing reads this column to AUTHENTICATE — the old
+    // key authenticates because better-auth's own row is still enabled — so a
+    // stale value here can never extend a credential's life.
+    previousApiKeyId: uuid().references(() => apikeys.id, { onDelete: "set null" }),
+    previousApiKeyExpiresAt: timestamp({ withTimezone: true }),
 
     // Denormalised current state, written by the sync handler every tick, so "Today" is one read.
     lastSyncAt: timestamp({ withTimezone: true }),

@@ -4,6 +4,7 @@ import { db } from "../db/index.js";
 import { policySets } from "../db/schema.js";
 import { log } from "../lib/logger.js";
 import { type Job, startScheduler } from "../lib/scheduler.js";
+import { closeExpiredRotations } from "../routes/credential.js";
 import { evaluateLiveness } from "./liveness.js";
 import { projectEvents, reprojectTrailing48h, rollUpDaily } from "./project.js";
 import { pruneRetention } from "./prune.js";
@@ -97,6 +98,13 @@ export const jobs: Job[] = [
       await assertLiveRetentionInvariant();
       await exclusive(() => reprojectTrailing48h());
       await pruneRetention();
+      // Close every credential-rotation overlap whose 24 h has passed.
+      // ⚠️ Belt and braces — `apikeys.expiresAt` already ends the window
+      // inside better-auth, so a night when this job does not run costs
+      // nothing. It disables the superseded row as well, so an expired
+      // credential cannot come back by someone clearing an `expiresAt` they
+      // took for stale data.
+      await closeExpiredRotations();
       // The job the spec forgot: without it the 21-day horizon freezes on the
       // day a device enrols and no holiday ever reaches it again.
       await recompileHorizons();

@@ -68,6 +68,14 @@ export const PROBLEMS = {
   malformed: { slug: "malformed-request", status: 400, title: "Malformed request" },
   payloadTooLarge: { slug: "batch-too-large", status: 413, title: "Batch too large" },
   rateLimited: { slug: "rate-limited", status: 429, title: "Too many requests" },
+  // 409 maps to no action in §4.7's table, so the handler names `backoff`
+  // explicitly: the desired item is re-sent next tick and succeeds once the
+  // previous overlap window closes.
+  rotationInProgress: {
+    slug: "rotation-in-progress",
+    status: 409,
+    title: "A credential rotation is already in flight",
+  },
   internal: { slug: "internal-error", status: 500, title: "Internal error" },
 } as const;
 

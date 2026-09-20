@@ -1,4 +1,4 @@
-import { and, desc, eq, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gt, lte, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { db } from "../db/index.js";
@@ -6,6 +6,7 @@ import { apikeys, devices, policyVersions } from "../db/schema.js";
 import type { DevicePermission } from "../lib/device-keys.js";
 import { agentOnError, ProblemError } from "../lib/problem.js";
 import { type AuthVariables, requireAgentAuth } from "../middleware/auth.js";
+import { handleCredentialRotate } from "./credential.js";
 import { handleEvents } from "./events.js";
 import { handleSync } from "./sync.js";
 
@@ -76,8 +77,33 @@ function deviceResolver(opts: { allowDecommissioned: boolean; permission?: Devic
         permissions: apikeys.permissions,
       })
       .from(devices)
-      .innerJoin(apikeys, eq(apikeys.id, devices.apiKeyId))
-      .where(eq(devices.apiKeyId, session.id));
+      .innerJoin(apikeys, eq(apikeys.id, session.id))
+      // ★ The CURRENT key, or the superseded one inside its 24 h overlap.
+      //
+      // ⚠️ Matching only `api_key_id` makes the overlap worthless. The old
+      // key still AUTHENTICATES — better-auth's row is enabled and unexpired
+      // — but `devices.api_key_id` already points at the new one, so the
+      // lookup finds nothing and the device gets a 403. 403 maps to
+      // `halt_sync_keep_enforcing`, which is precisely the stranding the
+      // overlap was built to prevent: a Mac that rotated, lost power before
+      // persisting the new token, and can now never sync again without
+      // someone standing in front of it with a one-time code.
+      //
+      // Found by `credential.integration.test.ts`'s "the OLD credential still
+      // works immediately after rotation", which failed with 403.
+      //
+      // The window is bounded by `previous_api_key_expires_at`, and
+      // independently by better-auth's own `expiresAt` on the row — so a
+      // stale pointer here cannot extend a credential's life on its own.
+      .where(
+        or(
+          eq(devices.apiKeyId, session.id),
+          and(
+            eq(devices.previousApiKeyId, session.id),
+            gt(devices.previousApiKeyExpiresAt, sql`now()`),
+          ),
+        ),
+      );
 
     if (!device) {
       throw new ProblemError("scopeViolation", "this credential is not bound to a device");
@@ -206,3 +232,16 @@ agentApp.post("/sync", requireSyncScope, handleSync);
  * healthy. The handler asserts nothing about liveness; the test asserts that.
  */
 agentApp.post("/events", requireDeviceForTelemetry, handleEvents);
+
+/**
+ * `POST /api/agent/v1/credential/rotate` — a device swaps its credential, old
+ * one valid for another 24 h. Handler in `credential.ts`.
+ *
+ * ⚠️ Guarded by `requireSyncScope`, not a scope of its own. A new permission
+ * string would not be present on any key minted before it existed, and
+ * `hasPermission` treats absent permissions as allowed — so a fresh scope
+ * would be enforced on new devices and silently skipped on old ones, which is
+ * the worst of both. `sync` is the right authority: rotation is part of
+ * staying in touch with the control plane, and nothing else can reach it.
+ */
+agentApp.post("/credential/rotate", requireSyncScope, handleCredentialRotate);
