@@ -102,6 +102,29 @@ Argo CD, Loki, alerting). The 11 cluster verifications stay blocked until k3s is
   hides it; k8s creates a new container per pod restart, so it would crashloop during an npm outage.
   Fixed with `COREPACK_HOME` + chown. **`homework` and `homecal` ship the same unpatched file.**
   Captured as [[corepack-runtime-download]].
+- 2026-09-20: **Phase 2 step 1 complete — schema, migration and B1.** 29 tables in a single
+  `0000_init.sql` (14 rules half, 10 telemetry half, 5 better-auth from `homecal`), 14 CHECK
+  constraints, 27 `relations()` blocks. 42 API tests + 9 integration tests against real Postgres.
+- 2026-09-20: ✅ **B1 CLOSED — `casing: "snake_case"` works with better-auth.** Signed up, minted an
+  API key, signed back in; `sessions.user_id` not `"userId"`, and **zero camelCase columns across
+  all 29 tables**. This gate had been open since the project began; `homecal`'s camelCase fallback
+  is not needed.
+- 2026-09-20: ⚠️ **better-auth pinned to exactly `1.4.19`, no caret.** `homecal`'s manifest says
+  `^1.4.19` but its lockfile pins 1.4.19 — and that caret resolves to **1.7.5** today, which
+  **moved the apiKey plugin into a separate `@better-auth/api-key` package** and **changed the
+  `apikeys` table schema** (it demands a `configId` column 1.4.x never had). Minting a key failed
+  outright on 1.7.5. Since §5 says to take `homecal`'s auth wholesale and the entire X2 carve-out
+  and service-user flow are written against 1.4.x, the exact pin keeps step 2 as transcription
+  rather than porting. **The 1.7.x upgrade is deliberate future work, not a `pnpm update`.**
+- 2026-09-20: Applied **X12** (`shutdown_grace_s BETWEEN 60 AND 3600`, not §5.2's `0`) and **X11**
+  (no `policy_sets.fail_mode`) over §5.2, consistent with `packages/contract`. Gave `users.color` a
+  default — inherited verbatim from `homecal` as `notNull()` with none, which makes the very first
+  sign-up fail. Two other `homecal` calendar columns (`holiday_countries`, `receives_daily_digest`)
+  are carried unused; whether to drop them is a step-2 decision.
+- 2026-09-20: Two process notes. Drizzle numbers migrations from **0000**, not 0001 as planned.
+  And I edited `schema.ts` while the subagent writing it was still working — it detected the
+  collision and merged both versions. **Wait for the completion signal before touching a file a
+  subagent owns.**
 - 2026-09-20: **Phase 1 complete.** `packages/contract` defines the wire format — sync request and
   response, the policy document, the events envelope, `problem+json` + the eight `hpc_action`
   values, and the enrolment/health pair. 54 tests. A JSON-Schema artefact

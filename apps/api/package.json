@@ -19,6 +19,7 @@
   "dependencies": {
     "@hono/node-server": "^1.19.9",
     "@hpc/contract": "workspace:*",
+    "better-auth": "1.4.19",
     "drizzle-orm": "^0.45.1",
     "hono": "^4.11.9",
     "pino": "^10.3.1",
