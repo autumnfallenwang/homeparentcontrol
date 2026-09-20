@@ -18,9 +18,17 @@ ssh aaronwang@192.168.1.163     # works with ~/.ssh/id_ed25519
 `Host ubuntu → 192.168.1.163, User wangqiushi` entry left from before the Arch rebuild; it does not
 work. Also note `hostname` is not installed on that box — use `uname -n`.
 
-## `.arch.internal` resolves from the Mac
+## `.arch.internal` resolves from the Mac — but per host, not by wildcard
 
-The router serves it, so these work in a browser with no VPN and no `/etc/hosts` edit:
+⚠️ **Each hostname is registered individually on the router.** Verified 2026-09-20: all ten live
+ingress hosts resolve to `192.168.1.163`, and any unregistered name — including
+`homeparentcontrol.arch.internal` — returns **NXDOMAIN**. There is no `*.arch.internal` wildcard.
+
+**A new app therefore needs two router DNS entries added by hand** (`<app>` and `<app>-api`), and
+nothing in the GitOps chain does it. The failure mode is misleading: Argo reports Synced/Healthy,
+the pods run, the Ingress exists, and the browser still says "server not found".
+
+These work in a browser with no VPN and no `/etc/hosts` edit:
 
 | | |
 |---|---|

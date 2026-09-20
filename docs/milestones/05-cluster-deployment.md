@@ -57,6 +57,13 @@ succeeds, nothing reaches the cluster.
       `imagePullSecrets`**, so the cluster pulls anonymously — public is load-bearing. New packages
       default to private, so expect `ImagePullBackOff` on first sync until this is done.
 - [ ] **5. Flip `migrate.enabled` false → true** in the Application CR, once step 3 exists.
+- [ ] ⚠️ **6. Add two DNS entries on the router** — `homeparentcontrol.arch.internal` and
+      `homeparentcontrol-api.arch.internal`, both → `192.168.1.163`.
+      **`*.arch.internal` is NOT a wildcard.** Verified 2026-09-20: every one of the ten existing
+      ingress hosts has its own router entry, 1:1, and an unregistered name returns NXDOMAIN.
+      ⚠️ **Nastiest failure mode in this list:** Argo syncs green, pods run, the Ingress object is
+      created, everything in the cluster looks perfect — and the browser says "server not found".
+      Easy to lose an hour inside the cluster before suspecting DNS.
 
 After these, it is `git push` forever.
 
