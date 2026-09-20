@@ -1,6 +1,6 @@
 ---
 name: 05-cluster-deployment
-status: planned
+status: open
 opened: 2026-09-18
 ---
 
@@ -18,12 +18,21 @@ Nothing in milestones 01–04 depends on this. The agent moves from local to clu
 **Verified 2026-09-20: four independent things block deployment today.** None may be removed before
 the app is actually ready.
 
-| Block | State |
-|---|---|
-| CI has **only a `test` job** — no image build, no GHCR push, no arch-infra bump | ✅ |
-| **No `apps/homeparentcontrol.yaml` in `arch-infra`** — Argo does not know the app exists | ✅ |
-| **No GHCR packages** | ✅ |
-| **No `ARCH_INFRA_TOKEN`** secret on the repo | ✅ |
+| Block | State on 2026-09-18 | State now |
+|---|---|---|
+| CI has **only a `test` job** | ✅ blocking | ❌ **removed** — `build-and-deploy` and `bump-arch-infra` land 2026-09-20 |
+| **No `apps/homeparentcontrol.yaml` in `arch-infra`** | ✅ blocking | ✅ **still blocking** — and it is the LAST step, deliberately |
+| **No GHCR packages** | ✅ blocking | ❌ **removed** — both pushed by the first main build |
+| **No `ARCH_INFRA_TOKEN`** secret on the repo | ✅ blocking | ✅ **still blocking** |
+
+⚠️ **Two blocks remain, and both need the owner.** With the deploy jobs in
+place, `bump-arch-infra` now **fails hard** on each of them rather than
+`exit 0`-ing — so `main` is RED until they are cleared. Observed on the
+first push: `test` ✅, `build-and-deploy (api)` ✅, `build-and-deploy (web)`
+✅, `bump-arch-infra` ❌ with *"ARCH_INFRA_TOKEN is not set on this
+repository … nothing will reach the cluster. See deploy/RUNBOOK.md step 4."*
+That is B3 working: a red build that names the gap, instead of a green one
+that deployed nothing.
 
 ⚠️ **The Application CR is the LAST thing committed, never the first.** The `root` app-of-apps
 recurses `arch-infra/apps/` with **automated sync and prune**, so the CR appearing *is* the deploy.
@@ -53,9 +62,12 @@ succeeds, nothing reaches the cluster.
       soft-skips with `exit 0`.
 - [ ] **3. Create the `homeparentcontrol-secrets` cluster Secret** — `DATABASE_URL`,
       `BETTER_AUTH_SECRET`, `POLICY_SIGNING_KEY`. (`homework` has 2 keys, `homecal` 5.)
-- [ ] **4. Flip both GHCR packages to public.** Verified 2026-09-20: `homework-api` has **no
-      `imagePullSecrets`**, so the cluster pulls anonymously — public is load-bearing. New packages
-      default to private, so expect `ImagePullBackOff` on first sync until this is done.
+- [x] **4. Flip both GHCR packages to public** — ✅ **not needed, verified 2026-09-20.** Public
+      *is* load-bearing (`homework-api` has no `imagePullSecrets`, so the cluster pulls
+      anonymously), but both packages came out anonymously pullable: created by Actions with
+      `GITHUB_TOKEN`, they inherited the repository's PUBLIC visibility. Checked by fetching each
+      manifest with an anonymous GHCR token — `homeparentcontrol-api` 200,
+      `homeparentcontrol-web` 200, and a nonexistent package 403, so the check discriminates.
 - [ ] **5. Flip `migrate.enabled` false → true** in the Application CR, once step 3 exists.
 - [ ] ⚠️ **6. Add two DNS entries on the router** — `homeparentcontrol.arch.internal` and
       `homeparentcontrol-api.arch.internal`, both → `192.168.1.163`.
@@ -80,16 +92,36 @@ and the five alert rules provisioned as code.
 
 ## Exit criteria
 
-- [ ] Argo CD reconciles the app from the GitOps repo; a tag bump rolls it
-- [ ] Agent switches from `localhost` to the cluster by changing one env var, with **no code change**
-- [ ] Migrations apply via the Helm pre-upgrade hook
-- [ ] ⚠️ **C6 — a test alert demonstrably reaches the parent.** Until this passes, the entire
-      observability design is decoration. **Confirmed 2026-09-20 that there is currently NO
-      alerting in the cluster at all** — `/etc/grafana/provisioning/alerting/` is empty, no rules,
-      no contact points, no notifiers. This is a pre-existing gap: `homework`, `homecal` and
-      `homenews` have no alerting either, so any of them could be silently broken right now
-- [ ] Loki stream labels read from the live Alloy ConfigMap before writing any LogQL (C8 partial)
-- [ ] `git revert` rolls back both the app and the pinned agent version
+Everything buildable is built and checked against the live cluster read-only.
+What remains needs a browser, a router admin page, and one owner decision —
+the runbook is [`../../deploy/RUNBOOK.md`](../../deploy/RUNBOOK.md).
+
+- [ ] **Argo CD reconciles the app from the GitOps repo; a tag bump rolls it** — ⚠️ needs
+      bootstrap steps 3 (DNS), 4 (`ARCH_INFRA_TOKEN`) and 5 (the CR). The chart is written and
+      **all nine manifests pass a server-side dry run against the live API server**; the
+      Application CR validates against the real Argo CRD. Nothing is applied.
+- [~] **Agent switches from `localhost` to the cluster by changing one env var, with no code
+      change** — structurally true and worth stating precisely: the sync daemon reads
+      `HPC_BASE_URL` and nothing else, `resolveBaseURL()` is its only consumer, and the enforcer
+      never reads it at all. The *observation* needs a deployed cluster.
+- [ ] **Migrations apply via the Helm pre-upgrade hook** — the hook is written (`pre-install,
+      pre-upgrade`, weight -5) and disabled until the Secret exists. Needs the deploy.
+- [ ] ⚠️ **C6 — a test alert demonstrably reaches the parent.** ⛔ **Blocked on an owner
+      decision, and it is the one criterion no amount of code closes.** Re-confirmed 2026-09-20 by
+      reading the live Grafana ConfigMap: it holds `datasources.yaml` and `grafana.ini` and
+      nothing else — no alerting provisioning, no contact point, no notification policy, no SMTP
+      block. There is no notification service anywhere in the cluster (no ntfy, no Alertmanager,
+      no mail relay) and no SMTP secret in any namespace. A pre-existing gap: `homework`,
+      `homecal` and `homenews` have no alerting either, so **any of them could be silently broken
+      right now**. The five rules and the dashboard are written and their queries verified against
+      live Loki, which makes alerts *fire*; the channel is D.2, still open, and only that makes
+      them *arrive*.
+- [x] ★ **Loki stream labels read from the live Alloy ConfigMap before writing any LogQL** —
+      done, and it was worth doing: **every one of §7.5's five example queries is dead.** See
+      below.
+- [ ] **`git revert` rolls back both the app and the pinned agent version** — the two are
+      separate Helm parameters (`api.image.tag`/`web.image.tag` and `agent.desiredVersion`)
+      precisely so they revert independently. Needs the deploy.
 
 ## Traps to clear deliberately
 
@@ -111,6 +143,45 @@ and the five alert rules provisioned as code.
 - **Loki's out-of-order window** is `max_chunk_age/2`, default 1 h — the forwarder must rewrite
   timestamps after a long outage rather than dropping lines.
 
+## ★ What checking C8 actually found
+
+The exit criterion says "read the stream labels from the live Alloy ConfigMap
+**before writing any LogQL**". Doing so in that order turned out to matter:
+**all five of §7.5's example queries return nothing**, and one of them cannot
+work at all.
+
+Alloy sets exactly four labels — `namespace`, `pod`, `container`, `node` —
+confirmed by reading the ConfigMap and then asking Loki's label API. The spec
+selects `{app="homeparentcontrol", component="control-plane"}`. Neither label
+exists.
+
+Three findings, each verified against the live cluster:
+
+1. **`job` and `service_name` are traps, not alternatives.** `job` has a
+   single value for the entire cluster (`loki.source.kubernetes.pods`), and
+   `service_name` is derived by Loki from the *container* name — so
+   `{service_name="api"}` matches homework, homenews and homecal at once.
+   Verified: three namespaces came back. Only `{namespace=…}` isolates an app.
+2. **`or vector(0)` hides a wrong selector for ever.** It is the spec's own
+   defence against Grafana's No-Data synthetic-alert trap, and it works — but
+   it also converts "this query matches nothing" into a confident `0`. The
+   spec's selector returns **0 against a namespace holding 240 matching
+   lines**. A rule that can never fire, reporting healthy, indefinitely. The
+   `or vector(0)` is kept; the selector is now verified independently, which
+   is the only thing that can catch this.
+3. **A4 cannot read what it is written against.** It selects the *agent's*
+   log stream, and the agent is a LaunchDaemon on a Mac — its logs never
+   reach Loki, and shipping them would be a second telemetry path competing
+   with `/events`. Rewritten to count `agent_started` on the control plane's
+   own ingest line, which required one new counter beside the two already
+   there.
+
+Also: the log field is `state`, not `status`.
+
+Every query in `deploy/observability/` was executed against live Loki before
+being committed. The two "is the shape right" controls — a query that must
+return data, and one that must not — are recorded in that directory's README.
+
 ## Out of scope
 
 Real shutdown on the Mac mini (06) · O.2 remote access, unless the owner decides it.
@@ -118,3 +189,25 @@ Real shutdown on the Mac mini (06) · O.2 remote access, unless the owner decide
 ## Progress
 
 - 2026-09-18: Opened, blocked on cluster access.
+- 2026-09-20: **Opened for work.** Chart, secret script, Application CR, deploy jobs, dashboard
+  and alert rules. `helm lint` clean; all nine manifests and the Application CR pass a
+  server-side dry run against the live API server; every LogQL query executed against live Loki;
+  `actionlint` and `shellcheck` clean.
+- 2026-09-20: **C8 closed, and it found three bugs in §7.5's own examples.** See above.
+- 2026-09-20: **`bump-arch-infra` made to fail hard (B3/A.22), and observed failing.** The first
+  push built and shipped both images, then went red with *"ARCH_INFRA_TOKEN is not set … see
+  deploy/RUNBOOK.md step 4"*. The house template `exit 0`s there.
+- 2026-09-20: **GHCR step dropped** — both packages are already anonymously pullable.
+
+## ⛔ What is left, and who has to do it
+
+| | Needs | Why not from here |
+|---|---|---|
+| Router DNS ×2 | the router admin page | `*.arch.internal` is not a wildcard; nothing in the GitOps chain adds an entry |
+| `ARCH_INFRA_TOKEN` | a browser | a repo secret |
+| Commit the Application CR | a push to `arch-infra` | ⚠️ **the commit IS the deploy** — the `root` app-of-apps syncs automatically with prune, and there is no staging step. Doing it unasked would deploy a first-time app to a live home cluster |
+| C6's channel | an owner decision (D.2) | no notification service exists; which one to add is not a coding question |
+
+The cluster Secret (step 1) is scripted and its generator is verified end to
+end — the key it produces loads through the API's own `loadSigningKey` — but
+it writes a real credential to a live cluster, so it is the owner's to run.

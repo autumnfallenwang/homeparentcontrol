@@ -78,21 +78,34 @@ ssh aaronwang@192.168.1.163 \
 
 ---
 
-## 2. Flip both GHCR packages to public 🧑 *needs a browser*
+## 2. GHCR packages must be anonymously pullable — ✅ **already true**
 
-After the first `main` push builds them, both packages exist and are
-**private by default**.
+⚠️ **Public is load-bearing, not a convenience.** `homework-api` has **no
+`imagePullSecrets`**, so the cluster pulls anonymously. A private package
+gives `ImagePullBackOff` on the first sync, which reads like a broken image
+rather than a permissions setting.
 
+**Checked 2026-09-20, after the first `main` build pushed both images:**
+
+```sh
+check() {
+  TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:$1:pull&service=ghcr.io" \
+    | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
+  curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" \
+    -H "Accept: application/vnd.oci.image.index.v1+json" \
+    "https://ghcr.io/v2/$1/manifests/latest"
+}
+check autumnfallenwang/homeparentcontrol-api           # 200
+check autumnfallenwang/homeparentcontrol-web           # 200
+check autumnfallenwang/definitely-not-a-real-package   # 403  ← the check discriminates
 ```
-https://github.com/users/autumnfallenwang/packages/container/homeparentcontrol-api/settings
-https://github.com/users/autumnfallenwang/packages/container/homeparentcontrol-web/settings
-→ Danger Zone → Change visibility → Public
-```
 
-⚠️ **Public is load-bearing, not a convenience.** Verified: `homework-api`
-has **no `imagePullSecrets`**, so the cluster pulls anonymously. Skipping
-this gives `ImagePullBackOff` on the first sync, which reads like a broken
-image rather than a permissions setting.
+Both return **200**. The packages inherited the repository's PUBLIC
+visibility when Actions created them with `GITHUB_TOKEN`, so the manual flip
+the milestone anticipated is **not needed**. The third line is there because
+a check that only ever returns 200 proves nothing.
+
+⚠️ Re-run it if the repo is ever made private — the packages follow.
 
 ---
 

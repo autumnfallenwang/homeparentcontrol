@@ -1,6 +1,6 @@
 ---
 name: 04-parent-ui
-status: open
+status: awaiting-verification
 opened: 2026-09-18
 ---
 
@@ -96,3 +96,6 @@ Cluster (05) · real shutdown (06) · the offline override card (deferred — AD
 - **`/rules/calendar` has an API but no page.** Exceptions can be created and are compiled (and
   recompile every affected device), but the month view is not drawn. Listed in scope, not built —
   say so rather than let a tick imply otherwise.
+- 2026-09-20: **`awaiting-verification`.** No code left. One exit criterion is partial — the
+  mechanisms that make phone width work are verified in the built output and pinned by tests, but
+  nobody has looked at the UI on a phone. A two-minute glance closes it.
