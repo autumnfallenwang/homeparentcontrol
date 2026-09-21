@@ -69,6 +69,8 @@ When something needs recording, walk down in order:
 
 - [`docs/PUNCHLIST.md`](docs/PUNCHLIST.md) — ⛔ **everything outstanding, in one place.** No code
   left; it is all hardware, a router, a browser, or a decision
+- [`agent/scripts/smoke-test.md`](agent/scripts/smoke-test.md) — ⬅️ **the next thing to do.**
+  One Mac against the deployed cluster, safe build, nothing powers off
 - [`docs/architecture.md`](docs/architecture.md) — current system shape
 - [`docs/adr/`](docs/adr/) — append-only decision history
 - [`docs/milestones/`](docs/milestones/) — work plans + progress notes

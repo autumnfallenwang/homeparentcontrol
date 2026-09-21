@@ -17,9 +17,18 @@ get done — not by milestone.
 
 ## 🖥️ A Mac you are willing to have locked, and sudo
 
-The largest block, and the one that closes the most. Procedures:
-[`agent/scripts/v-series.md`](../agent/scripts/v-series.md) and
-[`agent/scripts/cutover.md`](../agent/scripts/cutover.md).
+The largest block, and the one that closes the most.
+
+### ⬅️ Start here: the smoke test (~40 min)
+
+[`agent/scripts/smoke-test.md`](../agent/scripts/smoke-test.md) — one Mac
+enrolled against the deployed cluster, locking at a boundary, with **nothing
+powering off**. It uses the safe build (`build-pkg.sh --dev`), so the real
+power-off stays a separate, later decision. Everything below is easier once
+this has worked once.
+
+Then: [`v-series.md`](../agent/scripts/v-series.md) and
+[`cutover.md`](../agent/scripts/cutover.md).
 
 ⚠️ **Do this on the mini, not the machine you work on.** Several of these
 lock the screen and one powers the computer off.

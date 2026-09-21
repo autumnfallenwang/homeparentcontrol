@@ -60,3 +60,4 @@ The skill picks a slug, writes the file with the right frontmatter, and updates 
 | [acknowledge-what-is-durable](./acknowledge-what-is-durable.md) | `feedback` | Ack everything now durable, not just what this call wrote — else the sender retries forever |
 | [walk-the-flow-not-the-endpoints](./walk-the-flow-not-the-endpoints.md) | `feedback` | Every component green and the composition unusable — the UI had no sign-in page |
 | [loki-labels-are-not-what-the-spec-says](./loki-labels-are-not-what-the-spec-says.md) | `reference` | Only `namespace`/`pod`/`container`/`node` exist — and `or vector(0)` hides a wrong selector for ever |
+| [strings-cannot-prove-swift-absence](./strings-cannot-prove-swift-absence.md) | `reference` | Swift packs literals ≤15 bytes into instruction immediates — use `nm` and `otool -tV` |

@@ -15,19 +15,45 @@
 # digest, because it looks like a control."
 #
 #   ./agent/scripts/build-pkg.sh 0.2.0
+#   ./agent/scripts/build-pkg.sh 0.2.0 --dev     # see below
+#
+# ⚠️ **`--dev` builds the SAFE variant** (`-DDEV_ENFORCEMENT`), where the real
+# power-off is replaced by a log line. It exists so a smoke test can exercise
+# the REAL install path — pkg, installer(8), launchd, enrolment, the lock —
+# without the first run being the one that powers a machine off.
+#
+# Three things make a dev pkg impossible to mistake for a production one, and
+# all three are deliberate: the VERSION carries a `-dev` suffix (so it shows
+# in `pkgutil --pkg-info` and in the `agent_version` every sync reports and
+# the parent UI displays), the filename carries `-DEV`, and `install.sh`
+# refuses it without `--allow-dev`. A safe binary installed by accident is an
+# agent that logs "would shut down" for ever and looks completely healthy.
 set -euo pipefail
 
-VERSION="${1:?usage: build-pkg.sh <version>}"
+VERSION="${1:?usage: build-pkg.sh <version> [--dev]}"
+DEV_FLAGS=""
+SUFFIX=""
+if [ "${2:-}" = "--dev" ]; then
+  DEV_FLAGS="-Xswiftc -DDEV_ENFORCEMENT"
+  SUFFIX="-DEV"
+  # ⚠️ The suffix goes into the VERSION, not just the filename. A filename is
+  # forgotten the moment the pkg is copied; a version travels with the agent
+  # to the control plane and onto the device card.
+  VERSION="${VERSION}-dev"
+  echo "⚠️  BUILDING THE SAFE VARIANT — shutdown is replaced by a log line."
+  echo "   Version will be $VERSION. Do NOT ship this."
+fi
 cd "$(dirname "$0")/../.."
 ROOT="$PWD"
 OUT="$ROOT/agent/.build/pkg"
 STAGE="$OUT/root"
 
-# ⚠️ Release, and WITHOUT -DDEV_ENFORCEMENT. The V-series builds the safe
-# variant; a shipped package must contain the real one. Getting this backwards
-# produces an agent that logs "would shut down" for ever.
-echo "── building release binaries"
-swift build -c release --package-path agent >/dev/null
+# ⚠️ Release. Without `--dev` this contains the REAL shutdown; getting that
+# backwards produces an agent that logs "would shut down" for ever and looks
+# perfectly healthy while doing it.
+echo "── building release binaries${SUFFIX:+ (SAFE VARIANT)}"
+# shellcheck disable=SC2086  # DEV_FLAGS is two separate argv words or none.
+swift build -c release --package-path agent $DEV_FLAGS >/dev/null
 BIN="$(swift build -c release --package-path agent --show-bin-path)"
 
 rm -rf "$STAGE"
@@ -87,7 +113,8 @@ printf '%s' "$DIGEST" > "$PKG.sha256"
 cat <<SUMMARY
 
 built   $PKG
-sha256  $DIGEST
+sha256  $DIGEST${SUFFIX:+
+        ⚠️  SAFE VARIANT — shutdown is a log line. install.sh needs --allow-dev.}
 
 Publish that digest as AGENT_PKG_SHA256 alongside AGENT_PKG_URL. The sync
 daemon refuses to stage a package whose bytes do not match, and the

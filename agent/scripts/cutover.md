@@ -6,6 +6,12 @@ two steps — an actual evening.
 ⚠️ **Do this on the mini, not on the machine you work on.** Step 3 powers a
 computer off on purpose.
 
+⚠️ **Do [`smoke-test.md`](./smoke-test.md) first.** It walks the same path
+with the safe build — enrol, lock, grant, reports — so the first time you
+run the real power-off, everything except the power-off is already known to
+work. Debugging an enrolment problem and a shutdown problem at the same time
+is how an evening disappears.
+
 ---
 
 ## 0. The abort, before anything else

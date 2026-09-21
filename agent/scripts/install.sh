@@ -3,9 +3,15 @@
 # anything about the install would make it fail silently.
 #
 #   sudo agent/scripts/install.sh [path/to/homeparentcontrol-<version>.pkg]
+#   sudo agent/scripts/install.sh <pkg> --allow-dev     # a SAFE-variant pkg
 #
 # With no argument it builds one from the working tree (release, WITHOUT
 # -DDEV_ENFORCEMENT) and installs that.
+#
+# ⚠️ A pkg built with `build-pkg.sh <v> --dev` has the real power-off
+# replaced by a log line. It is right for a first smoke test and wrong for
+# everything after, so installing one takes `--allow-dev`. An agent that
+# logs "would shut down" for ever looks completely healthy.
 #
 # ⚠️ **Every check in here exists because its failure mode is SILENT.** A
 # quarantined binary is SIGKILLed with no dialog; a plist that launchd
@@ -21,6 +27,9 @@ fi
 cd "$(dirname "$0")/../.."
 ROOT="$PWD"
 PKG="${1:-}"
+ALLOW_DEV=0
+for arg in "$@"; do [ "$arg" = "--allow-dev" ] && ALLOW_DEV=1; done
+[ "${PKG:-}" = "--allow-dev" ] && PKG=""
 
 # ── 0. Refuse to install onto a Mac that cannot be recovered.
 #
@@ -51,6 +60,20 @@ if [ -z "$PKG" ]; then
 fi
 
 [ -f "$PKG" ] || { echo "ERROR: $PKG not found" >&2; exit 1; }
+
+# ── ⚠️ Is this the safe variant, and did you mean it?
+case "$PKG" in
+  *-DEV.pkg|*-dev.pkg)
+    if [ "$ALLOW_DEV" -ne 1 ]; then
+      echo "ERROR: $(basename "$PKG") is the SAFE VARIANT — shutdown is a log line." >&2
+      echo "  Right for a first smoke test, wrong for everything after." >&2
+      echo "  Re-run with --allow-dev if that is what you want." >&2
+      exit 1
+    fi
+    echo "⚠️  Installing the SAFE VARIANT. This agent will NOT power the Mac off."
+    echo "   It reports its version with a -dev suffix, which shows on the device card."
+    ;;
+esac
 
 # ── 2. ⚠️ Quarantine, BEFORE installing.
 #

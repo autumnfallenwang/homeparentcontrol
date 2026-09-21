@@ -17,7 +17,7 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 openssl genpkey -algorithm ed25519 -out "$TMP/key.pem" 2>/dev/null
 
-FROM=$(date -v+${MINUTES_AHEAD}M +%H:%M)
+FROM=$(date -v+"${MINUTES_AHEAD}"M +%H:%M)
 UNTIL=$(date -v+1H +%H:%M)
 DAY=$(date +%a | tr '[:upper:]' '[:lower:]')
 TZNAME=$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')
@@ -26,6 +26,7 @@ echo "window: $FROM -> $UNTIL on $DAY, zone $TZNAME"
 
 # Sign it exactly as the server does: compact JWS, EdDSA, kid = RFC 7638
 # thumbprint of the public JWK.
+# shellcheck disable=SC2016  # the node program is not shell; $ is JS.
 node -e '
 const c = require("node:crypto"), fs = require("node:fs");
 const priv = c.createPrivateKey(fs.readFileSync(process.argv[1]));
