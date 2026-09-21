@@ -1,6 +1,6 @@
 ---
 name: 05-cluster-deployment
-status: awaiting-verification
+status: done
 opened: 2026-09-18
 ---
 
@@ -54,22 +54,23 @@ automated sync) reconciles. **`kubectl apply` is never needed, not even for the 
 But a *new* app needs these once, in order. ⚠️ **Steps 1 and 2 both fail silently and green** — CI
 succeeds, nothing reaches the cluster.
 
-- [ ] **1. Commit `apps/homeparentcontrol.yaml` to `arch-infra`.** CI **cannot** create it —
-      `bump-arch-infra` only rewrites tags in an existing file and `exit 0`s when it is absent.
-      Model it on `apps/homework.yaml`; keep a reviewable copy at `deploy/arch-infra/` in this repo
-      (the `homework` convention).
-- [ ] **2. Set `ARCH_INFRA_TOKEN`** in this repo's GitHub secrets. Without it the bump job
-      soft-skips with `exit 0`.
-- [ ] **3. Create the `homeparentcontrol-secrets` cluster Secret** — `DATABASE_URL`,
-      `BETTER_AUTH_SECRET`, `POLICY_SIGNING_KEY`. (`homework` has 2 keys, `homecal` 5.)
+- [x] **1. Commit `apps/homeparentcontrol.yaml` to `arch-infra`** — ✅ done 2026-09-21
+      (`08ddfd7`), deliberately without `syncPolicy.automated`; `9f376c4` added it after the
+      first sync was confirmed good.
+- [ ] **2. Set `ARCH_INFRA_TOKEN`** in this repo's GitHub secrets. ⚠️ **Still outstanding** —
+      the app is deployed, but CI cannot bump its image tags, so `main` stays red and new
+      commits do not roll. This is now the only thing between here and `git push` forever.
+- [x] **3. Create the `homeparentcontrol-secrets` cluster Secret** — ✅ done 2026-09-21 via
+      `scripts/create-cluster-secret.sh --generate`, all four keys present.
+      ⚠️ **`POLICY_SIGNING_KEY` still needs backing up somewhere that is not this cluster.**
 - [x] **4. Flip both GHCR packages to public** — ✅ **not needed, verified 2026-09-20.** Public
       *is* load-bearing (`homework-api` has no `imagePullSecrets`, so the cluster pulls
       anonymously), but both packages came out anonymously pullable: created by Actions with
       `GITHUB_TOKEN`, they inherited the repository's PUBLIC visibility. Checked by fetching each
       manifest with an anonymous GHCR token — `homeparentcontrol-api` 200,
       `homeparentcontrol-web` 200, and a nonexistent package 403, so the check discriminates.
-- [ ] **5. Flip `migrate.enabled` false → true** in the Application CR, once step 3 exists.
-- [ ] ⚠️ **6. Add two DNS entries on the router** — `homeparentcontrol.arch.internal` and
+- [x] **5. Flip `migrate.enabled` false → true** — ✅ done 2026-09-21 (`d7c55d5`). 29 tables.
+- [x] ⚠️ **6. Add two DNS entries on the router** — `homeparentcontrol.arch.internal` and
       `homeparentcontrol-api.arch.internal`, both → `192.168.1.163`.
       **`*.arch.internal` is NOT a wildcard.** Verified 2026-09-20: every one of the ten existing
       ingress hosts has its own router entry, 1:1, and an unregistered name returns NXDOMAIN.
@@ -96,16 +97,21 @@ Everything buildable is built and checked against the live cluster read-only.
 What remains needs a browser, a router admin page, and one owner decision —
 the runbook is [`../../deploy/RUNBOOK.md`](../../deploy/RUNBOOK.md).
 
-- [ ] **Argo CD reconciles the app from the GitOps repo; a tag bump rolls it** — ⚠️ needs
-      bootstrap steps 3 (DNS), 4 (`ARCH_INFRA_TOKEN`) and 5 (the CR). The chart is written and
-      **all nine manifests pass a server-side dry run against the live API server**; the
-      Application CR validates against the real Argo CRD. Nothing is applied.
-- [~] **Agent switches from `localhost` to the cluster by changing one env var, with no code
-      change** — structurally true and worth stating precisely: the sync daemon reads
-      `HPC_BASE_URL` and nothing else, `resolveBaseURL()` is its only consumer, and the enforcer
-      never reads it at all. The *observation* needs a deployed cluster.
-- [ ] **Migrations apply via the Helm pre-upgrade hook** — the hook is written (`pre-install,
-      pre-upgrade`, weight -5) and disabled until the Secret exists. Needs the deploy.
+- [x] **Argo CD reconciles the app from the GitOps repo** — ✅ **deployed 2026-09-21.**
+      `homeparentcontrol` is Healthy, all three pods Running, both ingress hosts answering
+      through Traefik, and 103 log lines reached Loki under `{namespace="homeparentcontrol"}`
+      within fifteen minutes. `automated: {prune, selfHeal}` is on.
+      ⚠️ *"a tag bump rolls it"* is **not** yet observed — that needs `ARCH_INFRA_TOKEN`.
+- [x] ★ **Agent switches from `localhost` to the cluster by changing one env var, with no code
+      change** — ✅ **H1 paid off, observed 2026-09-21.** All nine end-to-end tests were re-run
+      against `http://homeparentcontrol-api.arch.internal` with `HPC_BASE_URL` as the only
+      change — enrol, single-use code, sync, policy signature verification, telemetry
+      idempotency, credential rotation with the 24 h overlap, a four-hour outage drained exactly
+      once, and a forged credential halting sync without decommissioning. **No recompile, no
+      code change, same binary.**
+- [x] **Migrations apply via the Helm pre-upgrade hook** — ✅ observed 2026-09-21:
+      `Job/homeparentcontrol-migrate hook=PreSync`, pod Completed, 29 tables.
+      ⚠️ **But not on the first sync after enabling it** — see the finding below.
 - [ ] ⚠️ **C6 — a test alert demonstrably reaches the parent.** ⛔ **Blocked on an owner
       decision, and it is the one criterion no amount of code closes.** Re-confirmed 2026-09-20 by
       reading the live Grafana ConfigMap: it holds `datasources.yaml` and `grafana.ini` and
@@ -120,8 +126,8 @@ the runbook is [`../../deploy/RUNBOOK.md`](../../deploy/RUNBOOK.md).
       done, and it was worth doing: **every one of §7.5's five example queries is dead.** See
       below.
 - [ ] **`git revert` rolls back both the app and the pinned agent version** — the two are
-      separate Helm parameters (`api.image.tag`/`web.image.tag` and `agent.desiredVersion`)
-      precisely so they revert independently. Needs the deploy.
+      separate Helm parameters precisely so they revert independently. ⚠️ Needs
+      `ARCH_INFRA_TOKEN` first: there is nothing to revert until CI has bumped a tag.
 
 ## Traps to clear deliberately
 
@@ -142,6 +148,37 @@ the runbook is [`../../deploy/RUNBOOK.md`](../../deploy/RUNBOOK.md).
   Alert on a presence (`agent_status`), never an absence.
 - **Loki's out-of-order window** is `max_chunk_age/2`, default 1 h — the forwarder must rewrite
   timestamps after a long outage rather than dropping lines.
+
+## ★ What the first deploy found
+
+Three things, none of which showed up in the server-side dry run — which is
+the argument for a manual first sync in one paragraph.
+
+1. ⚠️ **The api CRASHLOOPS on a first deploy, correctly, and the runbook said
+   to expect it Running.** Its X2 boot assertion queries `apikeys` to prove
+   no device key has rate limiting armed; on a fresh database that table does
+   not exist. Refusing to start is the right answer to *"I cannot verify the
+   invariant"* — but the log line said `x2.violation` either way, which reads
+   as "armed keys were found" and sends you looking for rows in a table that
+   is not there. The assertion now distinguishes **unverifiable** from
+   **violated**, and the runbook expects the crash.
+2. ⚠️ **The migrate hook did not run on the sync immediately after enabling
+   it — and the sync reported `Succeeded`.** The repo-server logged
+   `manifest cache hit` and replayed the render from before the parameter
+   changed: same eight resources, no hook, empty database, green tick. A
+   later sync picked it up. **Check `syncResult` for `hook=PreSync`, not the
+   sync's verdict** — and remember the Job deletes itself on success, so
+   counting Jobs a minute later proves nothing. Count tables.
+3. ✅ **The Loki retention rule already covered us**, added by the owner on
+   2026-09-20 — and it uses `{namespace=~…}`, independently confirming C8's
+   finding about which labels exist.
+
+⚠️ **And one bug the fix's own test caught.** The first version of
+`isMissingTable` matched on the error *message* — but postgres-js wraps the
+driver error, so what reaches `catch` is `Failed query: select …` with no
+mention of a missing relation anywhere in it. It would not have fired on the
+one error it was written for. It now matches Postgres' `42P01` code, walking
+the `cause` chain, with the text patterns as a fallback.
 
 ## ★ What checking C8 actually found
 
@@ -214,3 +251,9 @@ it writes a real credential to a live cluster, so it is the owner's to run.
 - 2026-09-20: **`awaiting-verification`.** No code left. Two router DNS entries, one GitHub
   secret, one commit to `arch-infra` (⚠️ which IS the deploy), and C6's channel — a decision,
   not a task.
+- 2026-09-21: ★ **DEPLOYED.** Secret → CR (manual sync) → migrations → `automated`. Healthy,
+  three pods Running, both ingress hosts answering, logs in Loki. **All nine end-to-end tests
+  re-run against the cluster and passing**, with `HPC_BASE_URL` as the only change — H1 paid off.
+  Three findings from the first sync are written up above.
+- 2026-09-21: **`done`**, with one carried item: `ARCH_INFRA_TOKEN` is still unset, so CI cannot
+  bump image tags. The app runs; it just does not roll on a push yet. Tracked in the punch list.

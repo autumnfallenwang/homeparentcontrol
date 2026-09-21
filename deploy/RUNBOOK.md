@@ -173,12 +173,28 @@ https://argocd.arch.internal → homeparentcontrol → SYNC
 
 ```sh
 ssh aaronwang@192.168.1.163 'kubectl -n homeparentcontrol get pods,svc,ingress'
-# api + web Running, db Running, three Services, two Ingresses.
-# The migrate Job should be ABSENT — migrate.enabled is still "false".
 ```
 
-Then open `http://homeparentcontrol.arch.internal` and confirm the sign-in
-page renders. If DNS was skipped in step 3, this is where it bites.
+Expect: **db and web Running, three Services, two Ingresses — and the api
+in `CrashLoopBackOff`.** The migrate Job should be absent.
+
+⚠️ **The crashing api is CORRECT here, and an earlier version of this
+runbook wrongly told you to expect it Running.** Its X2 boot assertion
+queries `apikeys` to prove no device key has rate limiting armed, and on a
+fresh database that table does not exist yet. Refusing to start is the right
+answer to *"I cannot verify the invariant"* — it just reads like a violation,
+because the log line says `x2.violation` either way:
+
+```
+{"level":50,"event":"x2.violation","err":"Failed query: select … from \"apikeys\" …","msg":"refusing to start"}
+```
+
+So on a first deploy the order is necessarily **sync → migrations → api
+starts**. Do step 7 now and come back.
+
+The web pod serves before the api does, so you can already check DNS:
+`http://homeparentcontrol.arch.internal` should render the sign-in page. If
+step 3 was skipped, this is where it bites.
 
 ---
 
@@ -203,8 +219,35 @@ deploy. This turns the first sync from "hope" into "look, then leap".
 ## 7. Enable migrations
 
 Change `migrate.enabled` to `"true"` in `apps/homeparentcontrol.yaml`, commit,
-push. The pre-upgrade hook runs `drizzle-kit migrate` against the SQL baked
-into the api image.
+push, and sync. The PreSync hook runs `drizzle-kit migrate` against the SQL
+baked into the api image.
+
+⚠️ **The hook may not run on the first sync after you flip it, and the sync
+will still report `Succeeded`.** Observed 2026-09-21: the repo-server logged
+`manifest cache hit` and replayed the render from *before* the parameter
+changed, so the sync applied the same eight resources, ran no hook, and left
+an empty database — while reporting success. A later sync picked it up.
+
+**Check for the hook, not for the sync's verdict:**
+
+```sh
+kubectl get application homeparentcontrol -n argocd \
+  -o jsonpath='{range .status.operationState.syncResult.resources[*]}{.kind}/{.name} hook={.hookType}{"\n"}{end}' \
+  | grep PreSync
+# expect: Job/homeparentcontrol-migrate hook=PreSync
+```
+
+If it is absent, the render is stale — force it rather than assuming the
+hook is broken:
+
+```sh
+kubectl annotate application homeparentcontrol -n argocd \
+  argocd.argoproj.io/refresh=hard --overwrite
+```
+
+⚠️ The Job deletes itself on success (`hook-delete-policy: hook-succeeded`),
+so `kubectl get jobs` a minute later shows nothing either way. **Count the
+tables, not the Jobs.**
 
 **Verify:**
 

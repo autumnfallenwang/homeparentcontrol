@@ -1,6 +1,10 @@
 # The punch list
 
-Everything outstanding in the project, in one place, as of **2026-09-20**.
+Everything outstanding in the project, in one place, as of **2026-09-21**.
+
+✅ **The cluster deploy is done.** `homeparentcontrol` is Healthy on k3s, both
+ingress hosts answer, and all nine end-to-end tests pass against it with
+`HPC_BASE_URL` as the only change. What follows is what is left.
 
 **There is no code left to write.** Every item below needs hardware, a
 router, a browser, a push to a second repo, or a decision. That is why no
@@ -69,10 +73,10 @@ log.
 
 ---
 
-## 📡 The router admin page
+## 📡 The router admin page — ✅ done
 
-- [ ] **Two DNS entries**, both → `192.168.1.163`:
-      `homeparentcontrol.arch.internal` and `homeparentcontrol-api.arch.internal`
+- [x] **Two DNS entries**, both → `192.168.1.163`: ✅ **done 2026-09-21**, and
+      verified resolving from the Mac before the deploy.
 
 ⚠️ `*.arch.internal` is **not** a wildcard — all ten live hosts have their
 own 1:1 entry. This is the nastiest failure in the whole list: Argo syncs
@@ -85,10 +89,12 @@ Verify from the Mac *before* deploying: `dig +short homeparentcontrol.arch.inter
 
 ## 🌐 A browser
 
-- [ ] **Set `ARCH_INFRA_TOKEN`** — a classic PAT with `repo` scope on
+- [ ] ⬅️ **Set `ARCH_INFRA_TOKEN`** — a classic PAT with `repo` scope on
       `autumnfallenwang/arch-infra`, added to this repo's Actions secrets.
-      ⚠️ Until this exists, **`main` stays red**: `bump-arch-infra` fails
-      hard rather than `exit 0`-ing, which is the point (B3/A.22).
+      **This is now the single thing between here and `git push` forever.**
+      The app is deployed and running, but CI cannot bump its image tags, so
+      a new commit does not roll — and `main` stays red, because
+      `bump-arch-infra` fails hard rather than `exit 0`-ing (B3/A.22).
 - [ ] **Look at the UI on a phone.** Two minutes. The viewport tag, the
       44px targets and the single-column layout are all verified in the
       built output and pinned by tests — but nobody has *looked*.
@@ -98,28 +104,32 @@ anonymously pullable, having inherited the repo's PUBLIC visibility.
 
 ---
 
-## 🔑 The cluster, and a push to `arch-infra`
+## 🔑 The cluster — ✅ **deployed 2026-09-21**
 
-Runbook: [`../deploy/RUNBOOK.md`](../deploy/RUNBOOK.md). Order matters.
+Steps 1–4 are done: Secret created, CR committed (`08ddfd7`), migrations run
+(29 tables), `automated: {prune, selfHeal}` on (`9f376c4`). Healthy, three
+pods Running, both ingress hosts answering, 103 log lines in Loki.
 
-- [ ] **1. Create the cluster Secret** — `bash scripts/create-cluster-secret.sh --generate`,
-      then run it again to apply.
-      ⚠️ **Back up `POLICY_SIGNING_KEY` immediately, somewhere that is not
-      this cluster.** There is no rotation channel: replacing it makes every
-      enrolled Mac reject every policy and keep enforcing yesterday's rules
-      for ever. Recovery means re-enrolling each Mac by hand.
-- [ ] **2. Commit `apps/homeparentcontrol.yaml` to `arch-infra`** —
-      ⚠️ **this commit IS the deploy.** The `root` app-of-apps syncs
-      automatically with prune; there is no staging step. Copy it from
-      `deploy/arch-infra/`, which deliberately has **no `automated:` block**
-      so the first sync is by hand.
-- [ ] **3. Sync once by hand**, confirm pods, then add `automated:
-      {prune, selfHeal}` in a **second** commit.
-- [ ] **4. Flip `migrate.enabled` → `"true"`** once the Secret exists.
-- [ ] **5. Point the agent at the cluster** — one env var, `HPC_BASE_URL`.
-      ⚠️ This is hypothesis H1 either paying off or not.
-- [ ] **6. Provision the observability files** into the
-      `observability-grafana` chart's values.
+⚠️ **One thing from that session still needs you:**
+
+- [ ] **Back up `POLICY_SIGNING_KEY`** somewhere that is not this cluster.
+      There is no rotation channel: replacing it makes every enrolled Mac
+      reject every policy and keep enforcing yesterday's rules for ever.
+
+      ```sh
+      ssh aaronwang@192.168.1.163 \
+        'kubectl -n homeparentcontrol get secret homeparentcontrol-secrets \
+           -o jsonpath="{.data.POLICY_SIGNING_KEY}" | base64 -d'
+      ```
+
+Still to do:
+
+- [ ] **Provision the observability files** into the `observability-grafana`
+      chart's values in `arch-infra`.
+- [ ] **Point the agent at the cluster** when you install it —
+      `HPC_BASE_URL=http://homeparentcontrol-api.arch.internal/api/agent/v1/`.
+      ✅ Already proven to need no code change: the full e2e suite passes
+      against the cluster with only that variable different.
 
 ---
 
@@ -182,7 +192,10 @@ toward collecting, with tests.
 
 ## If you do only three things
 
-1. **V-PKG-1** — it can invalidate a design, and that is worth knowing early.
-2. **V6** — the only direct proof of the claim everything else assumes.
+1. **Back up `POLICY_SIGNING_KEY`** — sixty seconds, and losing it means
+   re-enrolling every Mac by hand.
+2. **V-PKG-1** — it can invalidate a design, and that is worth knowing early.
 3. **C6** — because right now nothing in this house tells anyone when
    anything breaks.
+
+(And **`ARCH_INFRA_TOKEN`**: two minutes, and it turns `main` green.)
