@@ -2,13 +2,29 @@
 # Install a signed test policy whose window opens a couple of minutes from now,
 # so a V-series run does not mean waiting until 21:30 to learn anything.
 #
+#   sudo agent/scripts/make-test-policy.sh [minutes-ahead] [minutes-long]
+#   sudo agent/scripts/make-test-policy.sh 2 3     # opens in 2 min, CLOSES after 3
+#
 # ⚠️ Run with sudo — everything under /var/db/homeparentcontrol is root-owned.
 # ⚠️ Generates its OWN keypair. This is a test fixture, not the production key;
 #    the real one lives in the cluster secret and never touches a laptop.
+#
+# ★ **The window LENGTH is the safety feature, and it defaults short.**
+#
+# "Enforcement is the re-locking, not the lock": while the window holds, the
+# enforcer re-locks every 60 seconds. On a spare Mac that is fine. On the Mac
+# you are typing on it means about 55 usable seconds at a time, which is
+# enough to fix things and unpleasant enough to panic in.
+#
+# A window that CLOSES ON ITS OWN is therefore the primary recovery path —
+# it needs no command, no console and no presence of mind. Ten minutes was
+# the old default and is long enough to be genuinely stressful; three is
+# long enough to watch a lock, a re-lock and a release.
 set -euo pipefail
 
 ROOT=/var/db/homeparentcontrol
 MINUTES_AHEAD="${1:-2}"
+MINUTES_LONG="${2:-3}"
 
 [ "$(id -u)" -eq 0 ] || { echo "run with sudo"; exit 1; }
 mkdir -p "$ROOT/spool"
@@ -18,7 +34,7 @@ trap 'rm -rf "$TMP"' EXIT
 openssl genpkey -algorithm ed25519 -out "$TMP/key.pem" 2>/dev/null
 
 FROM=$(date -v+"${MINUTES_AHEAD}"M +%H:%M)
-UNTIL=$(date -v+1H +%H:%M)
+UNTIL=$(date -v+"$((MINUTES_AHEAD + MINUTES_LONG))"M +%H:%M)
 DAY=$(date +%a | tr '[:upper:]' '[:lower:]')
 TZNAME=$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')
 
@@ -73,3 +89,36 @@ console.log("kid:", kid);
 chmod 600 "$ROOT"/policy.*.json
 chmod 644 "$ROOT/policy_signing_keys.json"
 echo "installed under $ROOT"
+
+cat <<RECOVERY
+
+────────────────────────────────────────────────────────────────────────
+ The screen will lock at $FROM and RE-LOCK every 60 s until $UNTIL.
+ It releases on its own at $UNTIL — that is the recovery that needs
+ nothing from you.
+
+ If you want out sooner, from a terminal or over SSH:
+
+   sudo touch $ROOT/DISABLE     ★ use THIS one
+
+ ⚠️ Prefer the kill switch, because it is the only one-liner that stops
+ BOTH lockers. \`com.hpc.deadfall\` is a separate LaunchDaemon that sync
+ generates from the schedule; it wakes at the window start, re-evaluates
+ the whole predicate by itself and locks. So booting out the enforcer
+ alone looks like it worked and then the screen locks anyway:
+
+   sudo launchctl bootout system/com.hpc.enforcerd
+   sudo launchctl bootout system/com.hpc.deadfall    # ← needs BOTH
+
+ Both read DISABLE first, fresh from disk, before anything else — which
+ is exactly why it is the one to reach for under stress.
+
+ ⚠️ A lock is NOT a lockout. It is the normal macOS screen lock and your
+ own password clears it. Nothing here can touch your account, FileVault,
+ sudoers or Remote Login — the policy schema cannot express any of them
+ (A.34), which is structural rather than a promise.
+
+ ⚠️ Remember to remove DISABLE afterwards, or the agent stays off:
+   sudo rm -f $ROOT/DISABLE
+────────────────────────────────────────────────────────────────────────
+RECOVERY
