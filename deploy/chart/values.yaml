@@ -42,6 +42,20 @@ api:
   env:
     API_PORT: "52001"
     CORS_ORIGINS: http://homeparentcontrol.arch.internal
+    # ★ **Required, and its absence is invisible until someone tries to log
+    # in.** The UI is `homeparentcontrol.arch.internal` and the API is
+    # `homeparentcontrol-api.arch.internal` — two hosts. Without this the
+    # session cookie is host-only to the API, the browser will not carry it
+    # from the UI's origin, and the result is: sign-in returns 200, a session
+    # row is created, and every protected request then 401s. It reads as
+    # "I created an account and cannot log in".
+    #
+    # `auth.ts` was written for this and turns on `crossSubDomainCookies`
+    # only when it is set; omitting it from this file in milestone 05 is what
+    # produced exactly the failure its own comment predicted, on the first
+    # real login. Same registrable domain, so this is still same-SITE and
+    # SameSite=Lax applies — no TLS needed (X4).
+    COOKIE_DOMAIN: .arch.internal
     LOG_LEVEL: info
     # ⚠️ The pod's clock is NOT what bedtime uses — A.30 says the policy's
     # timezone wins, and the agent resolves boundaries in it. This is here so
