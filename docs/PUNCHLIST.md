@@ -15,9 +15,8 @@ or a decision. That is why no milestone is `open` — see `CLAUDE.md`'s note on
 > HEALTHY for 24 hours, but never locked: twelve problems between "the code is
 > correct" and "it runs under launchd from a browser". Eleven are fixed (ADR
 > 0010, milestone 06's progress notes). The twelfth is the first decision
-> below. ⚠️ **The fixes to the web and API have not reached the cluster** —
-> that needs `ARCH_INFRA_TOKEN`. Until then the rules page there still cannot
-> publish.
+> below. ✅ **Deployed 2026-09-27** (`1e51b54`) once `ARCH_INFRA_TOKEN` was
+> set — the first fully green build on `main`.
 
 Grouped by *what you need in your hand*, because that is how these actually
 get done — not by milestone.
@@ -37,9 +36,7 @@ power-off stays a separate, later decision. Everything below is easier once
 this has worked once.
 
 ⚠️ **Rewritten after the first run** — reinstall with the rebuilt pkg; the
-old one cannot say which variant it is and `install.sh` now refuses it. Needs
-`ARCH_INFRA_TOKEN` first, or publish step 5 from the browser console (the
-cluster's rules page still has the old bug).
+old one cannot say which variant it is and `install.sh` now refuses it.
 
 Then: [`v-series.md`](../agent/scripts/v-series.md) and
 [`cutover.md`](../agent/scripts/cutover.md).
@@ -113,15 +110,9 @@ Verify from the Mac *before* deploying: `dig +short homeparentcontrol.arch.inter
 
 ## 🌐 A browser
 
-- [ ] ⬅️ **Set `ARCH_INFRA_TOKEN`** — a classic PAT with `repo` scope on
-      `autumnfallenwang/arch-infra`, added to this repo's Actions secrets.
-      **This is now the single thing between here and `git push` forever.**
-      The app is deployed and running, but CI cannot bump its image tags, so
-      a new commit does not roll — and `main` stays red, because
-      `bump-arch-infra` fails hard rather than `exit 0`-ing (B3/A.22).
-      ⚠️ **It now also blocks the smoke-test fixes**: the rules page that can
-      publish, and the `/events` reader that stops dropping 47 % of events,
-      are committed but not deployed.
+- [x] ✅ **`ARCH_INFRA_TOKEN` set** 2026-09-27 — the shared `arch-infra-bump` token, the same one
+      homework, homecal and homenews use. `main` is green and commits roll to the cluster.
+      ⏰ It expires **2027-05-10** — see Known gaps.
 - [ ] **Look at the UI on a phone.** Two minutes. The viewport tag, the
       44px targets and the single-column layout are all verified in the
       built output and pinned by tests — but nobody has *looked*.
@@ -224,6 +215,15 @@ Still to do:
 
 ## 📋 Known gaps — recorded, not yet anyone's action
 
+- ⏰ **The shared deploy token expires 2027-05-10.** One fine-grained token (`arch-infra-bump`,
+  write to `arch-infra` only) is the `ARCH_INFRA_TOKEN` secret in homework, homecal, homenews and
+  homeparentcontrol. On that day **every app stops deploying at once** — builds go red at
+  `bump-arch-infra`, nothing else warns. A week before: regenerate it, then with the new value on
+  the clipboard run
+  `for r in homework homecal homenews homeparentcontrol; do pbpaste | gh secret set ARCH_INFRA_TOKEN --repo autumnfallenwang/$r; done`.
+  (Argo CD Image Updater would remove the token from every app repo; it is a change to all five
+  apps' deploy paths, so it is a deliberate project, not a side effect.)
+
 Things that are true and written down, but which nothing is currently
 blocked on.
 
@@ -259,8 +259,8 @@ toward collecting, with tests.
 
 ## If you do only three things
 
-1. **`ARCH_INFRA_TOKEN`** — two minutes. It turns `main` green, and it is now
-   what stands between the smoke-test fixes and the cluster.
+1. **Finish the smoke test through the real UI** — publish from `/rules`, and confirm the warning
+   is delivered and the ladder reaches the `DEV_ENFORCEMENT` line.
 2. **Decide the screen-lock delay** — until then a bedtime "lock" may be a
    black screen, and the dashboard cannot tell you.
 3. **Back up `POLICY_SIGNING_KEY`** — sixty seconds, and losing it means
