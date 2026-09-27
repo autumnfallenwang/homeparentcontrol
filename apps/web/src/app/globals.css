@@ -1,1 +1,83 @@
 @import "tailwindcss";
+
+/*
+ * The house look, taken from homework so the home* apps read as one family:
+ * a warm "paper" palette in oklch, a teal primary, and two semantic status
+ * colours — `ok` (homework's `meeting`) for "fine" and `attention` for "needs
+ * you". Headings are a serif (Newsreader), body text DM Sans; both are
+ * self-hosted by next/font in layout.tsx, never fetched from Google at view
+ * time.
+ *
+ * ⚠️ Light only, for now. homework also ships a `.dark` palette, but pages
+ * here still carry some literal colours, and a dark background under them
+ * would be unreadable. Dark mode arrives with the Appearance settings.
+ */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+
+  --color-ok: var(--ok);
+  --color-ok-foreground: var(--ok-foreground);
+  --color-attention: var(--attention);
+  --color-attention-foreground: var(--attention-foreground);
+  --color-info: var(--info);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-heading: var(--font-newsreader), "Georgia", serif;
+  --font-sans: var(--font-dm-sans), system-ui, sans-serif;
+}
+
+:root {
+  --radius: 0.5rem;
+  --background: oklch(0.965 0.006 75);
+  --foreground: oklch(0.28 0.018 60);
+  --card: oklch(0.985 0.004 75);
+  --card-foreground: oklch(0.28 0.018 60);
+  --primary: oklch(0.55 0.095 165);
+  --primary-foreground: oklch(0.98 0.005 165);
+  --secondary: oklch(0.93 0.008 75);
+  --secondary-foreground: oklch(0.3 0.02 60);
+  --muted: oklch(0.94 0.008 75);
+  --muted-foreground: oklch(0.5 0.02 60);
+  --accent: oklch(0.92 0.015 75);
+  --accent-foreground: oklch(0.28 0.018 60);
+  --destructive: oklch(0.6 0.18 25);
+  --destructive-foreground: oklch(0.99 0.005 25);
+  --border: oklch(0.9 0.012 75);
+  --input: oklch(0.93 0.01 75);
+  --ring: oklch(0.55 0.1 165);
+  --sidebar: oklch(0.955 0.008 75);
+
+  --ok: oklch(0.6 0.13 145);
+  --ok-foreground: oklch(0.98 0.01 145);
+  --attention: oklch(0.72 0.15 65);
+  --attention-foreground: oklch(0.22 0.04 65);
+  --info: oklch(0.55 0.12 240);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}

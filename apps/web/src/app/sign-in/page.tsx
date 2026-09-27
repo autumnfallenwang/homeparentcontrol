@@ -1,7 +1,9 @@
 "use client";
 
+import { MoonStar } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { APP_NAME } from "../../components/shell/nav.js";
 import { Banner, Button, Card, Field, inputClass } from "../../components/ui.js";
 import { currentSession, signIn, signUp } from "../../lib/auth-client.js";
 
@@ -55,7 +57,12 @@ export default function SignInPage() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center px-4 py-10">
-      <h1 className="mb-6 text-2xl font-semibold text-slate-900">homeparentcontrol</h1>
+      <div className="mb-6 flex items-center gap-2.5">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+          <MoonStar className="h-5 w-5 text-primary" />
+        </div>
+        <h1 className="font-heading text-2xl font-medium tracking-tight">{APP_NAME}</h1>
+      </div>
       <Card>
         <form onSubmit={submit} className="space-y-3">
           {mode === "up" ? (

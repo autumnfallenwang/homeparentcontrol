@@ -493,6 +493,25 @@ d("rules: diff, publish, restore", () => {
     expect(body.confirm_immediate_effect).toBe(false);
   });
 
+  /**
+   * ★ Found walking the rebuilt rules page: with nothing edited it offered
+   * "Ready to publish", and publishing answered `unchanged`. The diff compared
+   * JSON strings — reordered by jsonb, and carrying `issued_at` — so it said
+   * "changed" for every device ever published. It must agree with publish.
+   */
+  it("★ an untouched rule set is NOT changed — the same answer publish gives", async () => {
+    const f = await seed();
+    const diff = (await (await get(`/rules/diff?device_id=${f.deviceId}`, f)).json()) as {
+      changed: boolean;
+    };
+    expect(diff.changed).toBe(false);
+
+    const published = (await (
+      await send("/rules/publish", f, "POST", { device_id: f.deviceId })
+    ).json()) as { status: string };
+    expect(published.status).toBe("unchanged");
+  });
+
   it("★ a RELAXATION never asks for confirmation, however large", async () => {
     const f = await seed();
     const rules = (await (await get("/rules", f)).json()) as {

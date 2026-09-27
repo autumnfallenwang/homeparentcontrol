@@ -6,11 +6,11 @@ import {
   NO_DATA_FOR_PERIOD,
   ZERO_USAGE_FOR_PERIOD,
 } from "@hpc/contract";
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Card, ErrorNote, NoData, Spinner } from "../../components/ui.js";
-import { appName, dayAndTime, humanMinutes } from "../../lib/format.js";
-import { getReports, type ReportPayload } from "../../lib/parent-api.js";
+import { Page } from "../../../components/shell/page.js";
+import { Card, ErrorNote, NoData, Spinner } from "../../../components/ui.js";
+import { appName, dayAndTime, humanMinutes } from "../../../lib/format.js";
+import { getReports, type ReportPayload } from "../../../lib/parent-api.js";
 
 /**
  * `/reports` — D.2's **dashboard** sink.
@@ -44,14 +44,9 @@ export default function ReportsPage() {
   const peak = Math.max(1, ...(payload?.buckets.map((bucket) => bucket.activeS) ?? [1]));
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-4 py-6 sm:py-10">
-      <header className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
-        <div>
-          <Link href="/" className="text-sm text-slate-500 hover:underline">
-            ← Today
-          </Link>
-          <h1 className="mt-2 text-2xl font-semibold text-slate-900">Reports</h1>
-        </div>
+    <Page
+      title="Activity"
+      actions={
         <div className="flex gap-2">
           {(["day", "hour"] as const).map((option) => (
             <button
@@ -60,33 +55,36 @@ export default function ReportsPage() {
               onClick={() => setGrain(option)}
               className={`min-h-11 rounded-lg border px-3 text-sm ${
                 grain === option
-                  ? "border-slate-900 bg-slate-900 text-white"
-                  : "border-slate-300 bg-white text-slate-600"
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-card text-muted-foreground"
               }`}
             >
               {option === "day" ? "7 days" : "24 hours"}
             </button>
           ))}
         </div>
-      </header>
-
+      }
+    >
       {error ? <ErrorNote error={error} /> : null}
       {!payload && !error ? <Spinner /> : null}
 
       {payload ? (
         <div className="space-y-4">
           <Card>
-            <h2 className="font-medium text-slate-900" title={ACTIVE_TIME_EXPLANATION}>
+            <h2
+              className="font-heading text-lg font-medium tracking-tight"
+              title={ACTIVE_TIME_EXPLANATION}
+            >
               {ACTIVE_TIME_LABEL}
             </h2>
             {/* ★ The label's explanation, on the page rather than in a
                 tooltip. "Screen time" reads as "time the Mac was on". */}
-            <p className="mt-1 text-sm text-slate-600">{ACTIVE_TIME_EXPLANATION}</p>
-            <p className="mt-3 text-3xl font-semibold tabular-nums text-slate-900">
+            <p className="mt-1 text-sm text-muted-foreground">{ACTIVE_TIME_EXPLANATION}</p>
+            <p className="mt-3 text-3xl font-semibold tabular-nums text-foreground">
               {humanMinutes(payload.totals.activeS)}
             </p>
             {payload.totals.gapBuckets > 0 ? (
-              <p className="mt-2 text-sm text-amber-800">
+              <p className="mt-2 text-sm text-attention-foreground">
                 {payload.totals.gapBuckets} of {payload.buckets.length} periods have no data — the
                 Mac wasn’t reporting then, so this total is a floor, not the whole picture.
               </p>
@@ -94,22 +92,26 @@ export default function ReportsPage() {
           </Card>
 
           <Card>
-            <h2 className="font-medium text-slate-900">{grain === "day" ? "By day" : "By hour"}</h2>
+            <h2 className="font-heading text-lg font-medium tracking-tight">
+              {grain === "day" ? "By day" : "By hour"}
+            </h2>
             {payload.buckets.length === 0 ? (
-              <p className="mt-2 text-sm text-slate-500">Nothing recorded for this period.</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Nothing recorded for this period.
+              </p>
             ) : (
               <ul className="mt-3 space-y-2">
                 {payload.buckets.map((bucket) => (
                   <li key={bucket.bucket} className="text-sm">
                     <div className="flex items-baseline justify-between gap-3">
-                      <span className="text-slate-600">
+                      <span className="text-muted-foreground">
                         {grain === "day"
                           ? bucket.bucket
                           : new Date(bucket.bucket).toLocaleTimeString(undefined, {
                               hour: "2-digit",
                             })}
                       </span>
-                      <span className="tabular-nums text-slate-900">
+                      <span className="tabular-nums text-foreground">
                         {bucket.reported ? (
                           bucket.activeS > 0 ? (
                             humanMinutes(bucket.activeS)
@@ -126,10 +128,10 @@ export default function ReportsPage() {
                       track; an unreported one draws a HATCH. They must not
                       look the same.
                     */}
-                    <div className="mt-1 h-2 overflow-hidden rounded bg-slate-100">
+                    <div className="mt-1 h-2 overflow-hidden rounded bg-secondary">
                       {bucket.reported ? (
                         <div
-                          className="h-full bg-slate-800"
+                          className="h-full bg-primary"
                           style={{ width: `${Math.round((bucket.activeS / peak) * 100)}%` }}
                         />
                       ) : (
@@ -144,7 +146,7 @@ export default function ReportsPage() {
                       )}
                     </div>
                     {bucket.reported && bucket.apps.length > 0 ? (
-                      <ul className="mt-1 flex flex-wrap gap-x-3 text-xs text-slate-500">
+                      <ul className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
                         {bucket.apps.slice(0, 4).map((app) => (
                           <li key={app.bundleId}>
                             {appName(app.bundleId)} {humanMinutes(app.activeS)}
@@ -159,17 +161,21 @@ export default function ReportsPage() {
           </Card>
 
           <Card>
-            <h2 className="font-medium text-slate-900">What actually happened</h2>
+            <h2 className="font-heading text-lg font-medium tracking-tight">
+              What actually happened
+            </h2>
             {payload.enforcement.length === 0 ? (
-              <p className="mt-2 text-sm text-slate-500">
+              <p className="mt-2 text-sm text-muted-foreground">
                 No warnings, locks or shutdowns in this period.
               </p>
             ) : (
               <ul className="mt-3 space-y-2 text-sm">
                 {payload.enforcement.slice(0, 50).map((row) => (
                   <li key={`${row.kind}-${row.at}`} className="flex flex-wrap gap-2">
-                    <span className="w-40 shrink-0 text-slate-500">{dayAndTime(row.at)}</span>
-                    <span className="text-slate-900">{row.summary}</span>
+                    <span className="w-40 shrink-0 text-muted-foreground">
+                      {dayAndTime(row.at)}
+                    </span>
+                    <span className="text-foreground">{row.summary}</span>
                   </li>
                 ))}
               </ul>
@@ -177,6 +183,6 @@ export default function ReportsPage() {
           </Card>
         </div>
       ) : null}
-    </main>
+    </Page>
   );
 }

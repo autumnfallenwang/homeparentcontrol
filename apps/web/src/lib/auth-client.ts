@@ -54,9 +54,11 @@ export async function currentSession(): Promise<Session | null> {
   return body?.user ? body : null;
 }
 
-export async function signOut(): Promise<void> {
-  await fetch(`${apiBaseUrl()}/api/auth/sign-out`, {
-    method: "POST",
-    credentials: "include",
-  });
-}
+/**
+ * ⚠️ Sends an empty JSON body on purpose. better-auth refuses a POST with no
+ * content type (415), and a bare `fetch(url, { method: "POST" })` has none —
+ * so signing out failed silently, the session cookie survived, and /sign-in
+ * bounced straight back to Today. Found wiring the first Sign out button.
+ * On a tablet the whole family uses, "Sign out" that does not is a way in.
+ */
+export const signOut = () => auth<{ success: boolean }>("/sign-out", {});

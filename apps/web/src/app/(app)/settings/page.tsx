@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Banner, Card, ErrorNote, Field, inputClass, Spinner } from "../../components/ui.js";
-import { getSettings, patchSettings } from "../../lib/parent-api.js";
+import { Page } from "../../../components/shell/page.js";
+import { Banner, Card, ErrorNote, Field, inputClass, Spinner } from "../../../components/ui.js";
+import { getSettings, patchSettings } from "../../../lib/parent-api.js";
 
 /**
  * `/settings`.
@@ -32,17 +33,11 @@ export default function SettingsPage() {
     void refresh();
   }, [refresh]);
 
-  if (!state) return <Shell>{error ? <ErrorNote error={error} /> : <Spinner />}</Shell>;
+  if (!state)
+    return <Page title="Settings">{error ? <ErrorNote error={error} /> : <Spinner />}</Page>;
 
   return (
-    <Shell>
-      <header className="mb-6">
-        <Link href="/" className="text-sm text-slate-500 hover:underline">
-          ← Today
-        </Link>
-        <h1 className="mt-2 text-2xl font-semibold text-slate-900">Settings</h1>
-      </header>
-
+    <Page title="Settings">
       {error ? (
         <div className="mb-4">
           <ErrorNote error={error} />
@@ -59,7 +54,9 @@ export default function SettingsPage() {
           const child = state.children.find((item) => item.id === set.childId);
           return (
             <Card key={set.id}>
-              <h2 className="font-medium text-slate-900">{child?.displayName ?? "Child"}</h2>
+              <h2 className="font-heading text-lg font-medium tracking-tight">
+                {child?.displayName ?? "Child"}
+              </h2>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <Field label="Extra time allowed per day (minutes)">
                   <input
@@ -99,7 +96,7 @@ export default function SettingsPage() {
               {/* ⚠️ Caps are enforced in the AGENT too, so a server that
                   would happily issue a 6-hour grant cannot produce a UI
                   that lies. */}
-              <p className="mt-2 text-xs text-slate-500">
+              <p className="mt-2 text-xs text-muted-foreground">
                 These caps are applied on the Mac as well as here, so the number above is what
                 actually happens.
               </p>
@@ -118,9 +115,9 @@ export default function SettingsPage() {
                     void refresh();
                   }}
                 />
-                <span className="text-slate-800">Collect usage data</span>
+                <span className="text-foreground">Collect usage data</span>
               </label>
-              <p className="mt-1 text-xs text-slate-500">
+              <p className="mt-1 text-xs text-muted-foreground">
                 Turning this off stops the reports filling in. It does not change bedtime — the
                 rules are enforced either way.
               </p>
@@ -129,18 +126,16 @@ export default function SettingsPage() {
         })}
 
         <Card>
-          <h2 className="font-medium text-slate-900">Setting up another Mac</h2>
-          <p className="mt-1 text-sm text-slate-600">
+          <h2 className="font-heading text-lg font-medium tracking-tight">
+            Setting up another Mac
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
             <Link href="/setup" className="underline">
               Add a child or a Mac
             </Link>
           </p>
         </Card>
       </div>
-    </Shell>
+    </Page>
   );
-}
-
-function Shell({ children }: { children: React.ReactNode }) {
-  return <main className="mx-auto w-full max-w-3xl px-4 py-6 sm:py-10">{children}</main>;
 }

@@ -19,18 +19,30 @@ import { Banner, Card, NoData, type Tone } from "./ui.js";
  * for why: the natural phrasing of each state says something false, and a
  * second copy of the wording in the UI is a copy that will drift.
  */
-export function HealthCard({ card, children }: { card: DeviceCard; children?: React.ReactNode }) {
-  const subject = {
+/** Who the sentences are about. */
+export function cardSubject(card: DeviceCard) {
+  return {
     childName: card.child?.display_name ?? "your child",
     deviceLabel: card.label ?? "This Mac",
   };
+}
 
+/**
+ * The contract's words for this card's health — the ONLY source of them.
+ * Exported so Today's "needs you" rows say exactly what the card says.
+ */
+export function cardPhrasing(card: DeviceCard) {
   // ★ `lastPolicyDay` is the day the RULES came from, not the day it last
   // synced. §4.6's sentence is about which rules are in force.
-  const phrasing = healthPhrasing(card.health.state, subject, {
+  return healthPhrasing(card.health.state, cardSubject(card), {
     silentFor: humanDuration(card.health.silent_for_s),
     lastPolicyDay: weekdayOf(card.health.applied_policy_at),
   });
+}
+
+export function HealthCard({ card, children }: { card: DeviceCard; children?: React.ReactNode }) {
+  const subject = cardSubject(card);
+  const phrasing = cardPhrasing(card);
 
   const usage = card.usage_today;
   const reporting = card.health.state === "HEALTHY" || card.health.state === "DEGRADED";
@@ -38,13 +50,13 @@ export function HealthCard({ card, children }: { card: DeviceCard; children?: Re
   return (
     <Card tone={phrasing.tone as Tone}>
       <header className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-lg font-semibold text-slate-900">
+        <h2 className="font-heading text-xl font-medium tracking-tight">
           <Link href={`/devices/${card.device_id}`} className="hover:underline">
             {card.label ?? "Unnamed Mac"}
           </Link>
         </h2>
         {card.child?.display_name ? (
-          <span className="text-sm text-slate-600">{card.child.display_name}</span>
+          <span className="text-sm text-muted-foreground">{card.child.display_name}</span>
         ) : null}
       </header>
 
@@ -60,11 +72,11 @@ export function HealthCard({ card, children }: { card: DeviceCard; children?: Re
         </div>
       ) : null}
 
-      <p className="mt-2 text-sm font-medium text-slate-900">{phrasing.headline}</p>
+      <p className="mt-2 text-sm font-medium text-foreground">{phrasing.headline}</p>
       {/* ★ The still-enforcing sentence. Absent only for DEGRADED, where it
           would be a lie. */}
       {phrasing.reassurance ? (
-        <p className="mt-1 text-sm text-slate-700">{phrasing.reassurance}</p>
+        <p className="mt-1 text-sm text-foreground/85">{phrasing.reassurance}</p>
       ) : null}
 
       {/* ★ ONE banner, and a count for the rest. */}
@@ -87,14 +99,14 @@ export function HealthCard({ card, children }: { card: DeviceCard; children?: Re
 
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div>
-          <dt className="text-slate-500">Tonight</dt>
-          <dd className="font-medium text-slate-900">{tonightLine(card)}</dd>
+          <dt className="text-muted-foreground">Tonight</dt>
+          <dd className="font-medium text-foreground">{tonightLine(card)}</dd>
         </div>
         <div>
-          <dt className="text-slate-500" title={ACTIVE_TIME_EXPLANATION}>
+          <dt className="text-muted-foreground" title={ACTIVE_TIME_EXPLANATION}>
             {ACTIVE_TIME_LABEL}
           </dt>
-          <dd className="font-medium text-slate-900">
+          <dd className="font-medium text-foreground">
             {/*
               ★ §5.7 — zero usage and no data mean opposite things. A device
               that is not reporting gets a dash and a reason, never a 0.
@@ -105,21 +117,23 @@ export function HealthCard({ card, children }: { card: DeviceCard; children?: Re
       </dl>
       {/* The label's explanation, visible rather than only a tooltip — a
           tooltip does not exist on the phone this is read on. */}
-      <p className="mt-1 text-xs text-slate-500">{ACTIVE_TIME_EXPLANATION}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{ACTIVE_TIME_EXPLANATION}</p>
 
       {reporting && usage.top_apps.length > 0 ? (
         <ul className="mt-3 space-y-1 text-sm">
           {usage.top_apps.map((app) => (
             <li key={app.bundle_id} className="flex justify-between gap-3">
-              <span className="truncate text-slate-700">{appName(app.bundle_id)}</span>
-              <span className="tabular-nums text-slate-500">{humanMinutes(app.active_s)}</span>
+              <span className="truncate text-foreground/85">{appName(app.bundle_id)}</span>
+              <span className="tabular-nums text-muted-foreground">
+                {humanMinutes(app.active_s)}
+              </span>
             </li>
           ))}
         </ul>
       ) : null}
 
       {card.active_grants.length > 0 ? (
-        <p className="mt-3 text-sm text-slate-700">
+        <p className="mt-3 text-sm text-foreground/85">
           {card.active_grants
             .map((grant) =>
               grant.type === "suspend" ? "No bedtime tonight" : `+${grant.minutes} min tonight`,
@@ -128,7 +142,7 @@ export function HealthCard({ card, children }: { card: DeviceCard; children?: Re
         </p>
       ) : null}
 
-      {children ? <div className="mt-4 border-t border-black/5 pt-4">{children}</div> : null}
+      {children ? <div className="mt-4 border-t border-border pt-4">{children}</div> : null}
     </Card>
   );
 }

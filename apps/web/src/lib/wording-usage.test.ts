@@ -104,7 +104,10 @@ describe("the four load-bearing wordings", () => {
     const grant = files.find((file) => file.path.endsWith("grant-buttons.tsx"));
     expect(grant?.text).toContain("LATE_GRANT_DOES_NOT_UNLOCK");
 
-    const device = files.find((file) => file.path.includes("devices"));
+    // The Mac's OWN page — exact, because `/devices` is also a list page now,
+    // and "the first path containing devices" was a directory-order accident.
+    const device = files.find((file) => file.path.endsWith("devices/[id]/page.tsx"));
+    expect(device, "the Mac page must exist to be checked").toBeDefined();
     expect(device?.text).toContain("REVOKE");
     expect(device?.text).toContain("DECOMMISSION");
 

@@ -27,6 +27,8 @@ export interface PendingGrant {
   deviceId: string;
   result: GrantResult;
   sentAt: number;
+  /** Set by `settlePending` when a poll first sees the Mac report it. */
+  appliedSeenAt?: number;
 }
 
 export function GrantButtons({
@@ -121,7 +123,9 @@ function GrantProgress({ card, pending }: { card: DeviceCard; pending: PendingGr
     card.health.applied_policy_version !== null &&
     card.health.applied_policy_version >= target;
 
-  const elapsedMs = Date.now() - pending.sentAt;
+  // To the moment "applied" was first SEEN — not to now, which made the
+  // figure count up on every poll while the banner stayed up.
+  const elapsedMs = (pending.appliedSeenAt ?? Date.now()) - pending.sentAt;
   const sentAt = new Date(pending.result.sent_at).toLocaleTimeString();
 
   if (applied) {

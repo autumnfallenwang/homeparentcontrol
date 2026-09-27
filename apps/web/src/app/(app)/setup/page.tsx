@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { Page } from "../../../components/shell/page.js";
 import {
   Banner,
   Button,
@@ -10,8 +10,8 @@ import {
   Field,
   inputClass,
   Spinner,
-} from "../../components/ui.js";
-import { createChild, createDevice, getSetup, reissueCode } from "../../lib/parent-api.js";
+} from "../../../components/ui.js";
+import { createChild, createDevice, getSetup, reissueCode } from "../../../lib/parent-api.js";
 
 /**
  * `/setup` — add a child, add a Mac, get a code.
@@ -45,17 +45,15 @@ export default function SetupPage() {
     void refresh();
   }, [refresh]);
 
-  if (!state) return <Shell>{error ? <ErrorNote error={error} /> : <Spinner />}</Shell>;
+  if (!state)
+    return (
+      <Page title="Add a Mac" back={{ href: "/devices", label: "Macs" }}>
+        {error ? <ErrorNote error={error} /> : <Spinner />}
+      </Page>
+    );
 
   return (
-    <Shell>
-      <header className="mb-6">
-        <Link href="/" className="text-sm text-slate-500 hover:underline">
-          ← Today
-        </Link>
-        <h1 className="mt-2 text-2xl font-semibold text-slate-900">Set up a Mac</h1>
-      </header>
-
+    <Page title="Add a Mac" back={{ href: "/devices", label: "Macs" }}>
       {error ? (
         <div className="mb-4">
           <ErrorNote error={error} />
@@ -65,7 +63,7 @@ export default function SetupPage() {
       {freshCode ? (
         <div className="mb-4">
           <Banner tone="ok" title="Type this into the installer on the Mac">
-            <p className="my-2 select-all font-mono text-2xl tracking-wider text-slate-900">
+            <p className="my-2 select-all font-mono text-2xl tracking-wider text-foreground">
               {freshCode.code}
             </p>
             {/* ★ Once. Nothing stores it. */}
@@ -79,9 +77,9 @@ export default function SetupPage() {
 
       <div className="space-y-4">
         <Card>
-          <h2 className="font-medium text-slate-900">1. Who is it for?</h2>
+          <h2 className="font-heading text-lg font-medium tracking-tight">1. Who is it for?</h2>
           {state.children.length > 0 ? (
-            <ul className="mt-2 text-sm text-slate-700">
+            <ul className="mt-2 text-sm text-foreground/85">
               {state.children.map((child) => (
                 <li key={child.id}>
                   {child.displayName} {child.timezone ? `· ${child.timezone}` : null}
@@ -119,7 +117,7 @@ export default function SetupPage() {
         </Card>
 
         <Card>
-          <h2 className="font-medium text-slate-900">2. Which Mac?</h2>
+          <h2 className="font-heading text-lg font-medium tracking-tight">2. Which Mac?</h2>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <Field label="Child">
               <select
@@ -168,16 +166,16 @@ export default function SetupPage() {
 
         {state.devices.length > 0 ? (
           <Card>
-            <h2 className="font-medium text-slate-900">Macs</h2>
+            <h2 className="font-heading text-lg font-medium tracking-tight">Macs</h2>
             <ul className="mt-3 space-y-2 text-sm">
               {state.devices.map((device) => {
                 const pending = state.pending_codes.find((row) => row.device_id === device.id);
                 return (
                   <li key={device.id} className="flex flex-wrap items-center gap-3">
-                    <span className="text-slate-900">{device.label}</span>
-                    <span className="text-slate-500">{device.status}</span>
+                    <span className="text-foreground">{device.label}</span>
+                    <span className="text-muted-foreground">{device.status}</span>
                     {pending ? (
-                      <span className="text-slate-500">
+                      <span className="text-muted-foreground">
                         code {pending.hint}… {pending.expired ? "(expired)" : ""}
                       </span>
                     ) : null}
@@ -208,16 +206,12 @@ export default function SetupPage() {
             {/* ⚠️ A live device cannot be handed a fresh code — that would
                 let a second machine take over its identity while the first
                 kept enforcing with a credential nobody knows about. */}
-            <p className="mt-3 text-xs text-slate-500">
+            <p className="mt-3 text-xs text-muted-foreground">
               A Mac that has already enrolled cannot be given a new code. Revoke it first.
             </p>
           </Card>
         ) : null}
       </div>
-    </Shell>
+    </Page>
   );
-}
-
-function Shell({ children }: { children: React.ReactNode }) {
-  return <main className="mx-auto w-full max-w-3xl px-4 py-6 sm:py-10">{children}</main>;
 }

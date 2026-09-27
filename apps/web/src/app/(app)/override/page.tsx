@@ -1,11 +1,16 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { GrantButtons, type PendingGrant } from "../../components/grant-buttons.js";
-import { Button, Card, ErrorNote, Spinner } from "../../components/ui.js";
-import { dayAndTime } from "../../lib/format.js";
-import { type DeviceCard, getToday, listOverrides, revokeOverride } from "../../lib/parent-api.js";
+import { GrantButtons, type PendingGrant } from "../../../components/grant-buttons.js";
+import { Page } from "../../../components/shell/page.js";
+import { Button, Card, ErrorNote, Spinner } from "../../../components/ui.js";
+import { dayAndTime } from "../../../lib/format.js";
+import {
+  type DeviceCard,
+  getToday,
+  listOverrides,
+  revokeOverride,
+} from "../../../lib/parent-api.js";
 
 /**
  * `/override` — the grant history, and the same two-stage state as `/`.
@@ -39,14 +44,7 @@ export default function OverridePage() {
   }, [refresh, pending]);
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-4 py-6 sm:py-10">
-      <header className="mb-6">
-        <Link href="/" className="text-sm text-slate-500 hover:underline">
-          ← Today
-        </Link>
-        <h1 className="mt-2 text-2xl font-semibold text-slate-900">Extra time</h1>
-      </header>
-
+    <Page title="Extra time" back={{ href: "/", label: "Today" }}>
       {error ? (
         <div className="mb-4">
           <ErrorNote error={error} />
@@ -57,7 +55,7 @@ export default function OverridePage() {
       <div className="space-y-4">
         {cards?.map((card) => (
           <Card key={card.device_id}>
-            <h2 className="font-medium text-slate-900">
+            <h2 className="font-heading text-lg font-medium tracking-tight">
               {card.child?.display_name ?? "Unknown"} · {card.label}
             </h2>
             <div className="mt-3">
@@ -76,20 +74,20 @@ export default function OverridePage() {
 
         {history ? (
           <Card>
-            <h2 className="font-medium text-slate-900">Recent grants</h2>
+            <h2 className="font-heading text-lg font-medium tracking-tight">Recent grants</h2>
             {history.overrides.length === 0 ? (
-              <p className="mt-2 text-sm text-slate-500">None yet.</p>
+              <p className="mt-2 text-sm text-muted-foreground">None yet.</p>
             ) : (
               <ul className="mt-3 space-y-2 text-sm">
                 {history.overrides.map((row) => (
                   <li key={row.id} className="flex flex-wrap items-center gap-3">
-                    <span className="w-40 shrink-0 text-slate-500">
+                    <span className="w-40 shrink-0 text-muted-foreground">
                       {dayAndTime(row.created_at)}
                     </span>
-                    <span className="text-slate-900">
+                    <span className="text-foreground">
                       {row.type === "suspend" ? "No bedtime" : `+${row.minutes} min`}
                     </span>
-                    <span className="text-slate-500">
+                    <span className="text-muted-foreground">
                       {row.revoked_at
                         ? "revoked"
                         : row.live
@@ -113,12 +111,12 @@ export default function OverridePage() {
             )}
             {/* ⚠️ Revoked rows stay. "She got an extra 30 minutes on Tuesday
                 and I took it back" is a fact worth keeping. */}
-            <p className="mt-3 text-xs text-slate-500">
+            <p className="mt-3 text-xs text-muted-foreground">
               Grants are never deleted — a revoked one stays here so the history is complete.
             </p>
           </Card>
         ) : null}
       </div>
-    </main>
+    </Page>
   );
 }

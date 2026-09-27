@@ -12,6 +12,7 @@ import {
   scheduleWindows,
 } from "../db/schema.js";
 import { log } from "../lib/logger.js";
+import { contentHash } from "../policy/canonical.js";
 import { compilePolicy } from "../policy/compile.js";
 import { gatherCompilerInput } from "../policy/gather.js";
 import { publishPolicy } from "../policy/publish.js";
@@ -252,7 +253,11 @@ export async function handleRulesDiff(c: Context<{ Variables: ParentVariables }>
   const proposed = compilePolicy(input);
 
   const [current] = await db
-    .select({ version: policyVersions.version, document: policyVersions.document })
+    .select({
+      version: policyVersions.version,
+      document: policyVersions.document,
+      documentHash: policyVersions.documentHash,
+    })
     .from(policyVersions)
     .where(eq(policyVersions.deviceId, deviceId))
     .orderBy(desc(policyVersions.version))
@@ -271,7 +276,14 @@ export async function handleRulesDiff(c: Context<{ Variables: ParentVariables }>
     // ★ The compiled documents, not the rows. This is what the agent obeys.
     current_document: currentDocument,
     proposed_document: proposed,
-    changed: JSON.stringify(currentDocument) !== JSON.stringify(proposed),
+    // ⚠️ The SAME rule `publishPolicy` applies: canonical content hash against
+    // the stored one. This was `JSON.stringify(a) !== JSON.stringify(b)`, which
+    // is true for every device that has ever been published — the stored
+    // document comes back from jsonb with its keys reordered, and `issued_at`
+    // / `not_before` / `policy_version` differ on every compile anyway. So the
+    // review said "ready to publish" for rules nobody had touched, while
+    // publishing them answered `unchanged`. Found walking the rebuilt UI.
+    changed: !current || current.documentHash !== contentHash(proposed),
     // C3 — true ONLY for a tightening inside 15 minutes.
     confirm_immediate_effect: tightening.confirm,
     confirm_reason: tightening.reason,
