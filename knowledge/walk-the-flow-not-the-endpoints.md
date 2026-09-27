@@ -30,3 +30,9 @@ a child → add a Mac → enrol → sync → grant. Write down what you could no
 verified structurally is not the same as one observed, and
 [[falsify-the-gate]] applies to the walk as much as to a test: if nothing about the walk could
 have failed, it proved nothing.
+
+**It happened twice more.** 2026-09-21: login failed on the cluster because the chart never set
+`COOKIE_DOMAIN` — every API test green. 2026-09-22, the first on-hardware run: the rules page could
+save but never publish (a relative `fetch` hit the web origin), and nine more seams between the code
+and launchd ([[launchd-on-a-real-mac]], ADR 0010). **Three for three, nothing in CI drives a browser
+or installs a pkg** — the walk is the only test of those seams.

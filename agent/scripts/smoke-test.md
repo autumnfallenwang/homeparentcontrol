@@ -1,18 +1,17 @@
 # The smoke test
 
 **Goal: get one Mac enrolled against the deployed cluster, watch it lock at a
-boundary, and have nothing power off.** Roughly 40 minutes, most of it
-waiting for a two-minute window to arrive.
+boundary, and have nothing power off.** Roughly 30 minutes.
 
 This is the rehearsal before the cutover. It deliberately uses the **safe
 variant** of the agent — the real power-off is
 [`cutover.md`](./cutover.md) §3, afterwards, once everything else is known
 good.
 
-⚠️ **Use a spare Mac if you have one.** If not, the mini is fine for this
-run: nothing here powers it off, and the worst case is a locked screen you
-clear with her password. Do NOT use the machine you are working on — step 5
-locks the screen.
+⚠️ **Use a spare Mac if you have one.** If it has to be the machine you work
+on, it is safe — nothing here can power it off, and the test window closes by
+itself — but turn on Remote Login and keep a shell open from another machine
+(the Arch box works): a locked screen does not touch an SSH session.
 
 The control plane is already up:
 
@@ -21,6 +20,11 @@ The control plane is already up:
 | UI | `http://homeparentcontrol.arch.internal` |
 | API | `http://homeparentcontrol-api.arch.internal` |
 | Agent base URL | `http://homeparentcontrol-api.arch.internal/api/agent/v1/` |
+
+> **What the first run taught this document** (2026-09-22). It stalled for
+> two days on eleven problems, none of them in the enforcement code, all of
+> them between "the code is correct" and "it runs on a Mac under launchd".
+> Every step below says what went wrong at it. See ADR 0010.
 
 ---
 
@@ -31,105 +35,174 @@ Only you can do this; it needs a password.
 Open **`http://homeparentcontrol.arch.internal/sign-in`** → *First time
 here?* → your email and a password.
 
-⚠️ **The first account claims the household.** The database is empty (I
-removed the nine E2E households from the deploy verification), so whoever
-signs up first owns it. Make that you.
+⚠️ **The first account claims the household.** Make that you.
 
 **Verify:** you land on Today, and it says *"No Macs yet"*.
 
 ---
 
-## 2. Add the child and the Mac — 2 min 🧑
+## 2. Prepare the Mac — 5 min
+
+On the test Mac, from a clone of this repo. Do all of this **before**
+creating the enrolment code in step 3 — the code expires in 60 minutes, and
+the first run lost its code to install problems while the clock ran.
+
+**Remote Login on** — *System Settings → General → Sharing → Remote Login*.
+
+⚠️ Not `sudo systemsetup -setremotelogin on`: that needs Full Disk Access for
+the terminal even under sudo, and fails with a message that reads like a sudo
+problem. The installer only *warns* without Remote Login for the safe build
+(it cannot power off), but you want SSH to get back in while the screen is
+locked.
+
+**The screen lock must actually lock:**
+
+```sh
+sysadminctl -screenLock status     # run as the user who will be locked
+```
+
+⚠️ **It must say `immediate`.** The agent's primary lock is `pmset
+displaysleepnow`, which only turns the display off; whether waking it needs a
+password is this setting. The first run found `14400 seconds` — four hours —
+at which the "lock" is a black screen that a mouse wiggle undoes, while the
+agent logs `action_taken {action: lock}` and looks perfectly healthy. The
+agent does not check this yet (see `docs/PUNCHLIST.md`). To set it:
+
+```sh
+sysadminctl -screenLock immediate -password -     # prompts for the password
+```
+
+Note the old value so you can put it back afterwards.
+
+**Build the safe variant:**
+
+```sh
+./agent/scripts/build-pkg.sh 0.1.0 --dev
+```
+
+It refuses to finish unless all four binaries report `0.1.0-dev` — the
+suffix comes from the same compile flag that removes the power-off, so the
+version cannot lie about the variant.
+
+---
+
+## 3. Add the child and the Mac — 2 min 🧑
 
 **`/setup`** → add a child (name, timezone `America/New_York`) → add a Mac
 (pick the child, label it e.g. *Lucy's Mac mini*) → **Add it and get a
 code**.
 
-⚠️ **Copy the code now.** It is shown once and nothing stores it — the
-server keeps only a SHA-256 and a four-character hint. It expires in 60
-minutes.
-
-**Verify:** `/setup` lists the Mac as `pending` with a code hint.
+⚠️ **Copy the code and go straight to step 4.** It is shown once, nothing
+stores it, and the 60 minutes start now.
 
 ---
 
-## 3. Set the bedtime window — 1 min 🧑
-
-**`/rules`** → set a window a couple of minutes ahead of when you expect to
-finish step 4, every day, action **Lock the screen**. Save, then **Publish**.
-
-⚠️ If the window is within 15 minutes, the C3 guard fires and asks you to
-confirm. That is correct — it only ever fires on a *tightening* that bites
-soon. Confirm it.
-
-**Verify:** the diff pane shows the compiled document with your
-`restricted_from`, and publishing succeeds.
-
----
-
-## 4. Install the agent — 5 min
-
-On the test Mac, from a clone of this repo:
+## 4. Install and enrol — one command
 
 ```sh
-# The SAFE variant: the real power-off is replaced by a log line.
-./agent/scripts/build-pkg.sh 0.1.0 --dev
-
 sudo agent/scripts/install.sh \
-  agent/.build/pkg/homeparentcontrol-0.1.0-dev.pkg --allow-dev
+  agent/.build/pkg/homeparentcontrol-0.1.0-dev.pkg --allow-dev \
+  --base-url http://homeparentcontrol-api.arch.internal/api/agent/v1/ \
+  --code HPC-XXXX-XXXX-XXXX
 ```
 
-⚠️ `--allow-dev` is required on purpose. A safe build reports its version as
-`0.1.0-dev`, which shows on the device card, so you can never wonder later
-which one is running.
+The installer asks the packaged enforcer which variant it is and refuses a pkg
+whose name disagrees; checks quarantine, launchd and Remote Login; loads all
+three daemons; and writes the base URL and the code where sync reads them
+every tick. Nothing needs restarting.
 
-The installer refuses to finish unless Remote Login is on, the pkg and the
-whole installed tree are free of `com.apple.quarantine`, and launchd
-actually accepted all three daemons. **Each of those fails silently
-otherwise** — a quarantined non-notarized binary is SIGKILLed with no
-dialog.
+⚠️ **The base URL is a file, `/var/db/homeparentcontrol/base_url`.** Not
+`launchctl setenv` — SIP refuses it — and not an edit to the installed plist,
+which the next pkg upgrade silently reinstalls.
 
 If you copied the pkg from another machine: **`tar` or `rsync`, never
-`.zip`.** Re-verified on this hardware — `unzip` and `ditto -x -k` propagate
-quarantine, `tar` does not.
+`.zip`.** `unzip` and `ditto -x -k` propagate quarantine; `tar` does not.
 
-Point it at the cluster and enrol:
+**Verify — in the UI, not in a log.** Within about a minute the Mac appears on
+Today; within three ticks its health reads *"checking in normally"*; the
+device card shows **`0.1.0-dev`**.
+
+If it does not appear:
 
 ```sh
-sudo launchctl setenv HPC_BASE_URL \
-  http://homeparentcontrol-api.arch.internal/api/agent/v1/
-echo 'HPC-XXXX-XXXX-XXXX' | sudo tee /var/db/homeparentcontrol/enrolment_code
-sudo launchctl kickstart -k system/com.hpc.sync
+sudo cat /var/db/homeparentcontrol/sync.health
 ```
 
-**Verify — in the UI, not in a log.** Within about a minute the Mac appears
-on Today. Within three ticks its health reads *"checking in normally"*.
+| `last_decision` | Means |
+|---|---|
+| `no_base_url` | `--base-url` was missing or not http(s) |
+| `awaiting_enrolment_code` | no code staged — `printf 'HPC-…' \| sudo tee /var/db/homeparentcontrol/enrolment_code` |
+| `enrol_rejected:410` | the code **expired**. Make a new one in `/setup` and stage it. The dead code was moved to `enrolment_code.rejected` and is never retried |
+| `enrol_rejected:409` / `:404` | already used / mistyped. Same fix |
+| `enrol_failed:429` | the `/enroll` limiter (5/min, 20/hour for the household). Waits as told |
+| `enrol_failed:unreachable` | DNS or network — `dig +short homeparentcontrol-api.arch.internal` |
+
+⚠️ The first run's agent retried an expired code every second until the
+server burned it, then exhausted the household's 20-per-hour enrolment
+budget. A rejected code is now terminal after one attempt.
 
 ---
 
-## 5. Watch it lock — the actual test
+## 5. Set a test window and publish it — 3 min 🧑
+
+**`/rules`** → **Add a window** → set it to start **5 minutes from now** and
+end **8 minutes after that**. Make sure **today** is among its days (the
+default is Mon–Thu).
+
+Action: **Lock, then shut down** — *only* once the device card has shown
+`0.1.0-dev`. ⚠️ That is the only action that reaches the last rung: the ladder
+escalates to shutdown only for a `shutdown` window, so with **Lock the
+screen** the `DEV_ENFORCEMENT` line in step 6 can never appear. On the safe
+build the power-off is a log line. If the card does NOT say `-dev`, choose
+**Lock the screen** and skip that check.
+
+**Save draft**, then read the **"What the Mac will obey"** panel — the
+compiled document, not your edit — and **Publish**. The C3 guard fires
+because it bites within 15 minutes; that is correct, confirm it.
+
+The page says which Mac it publishes to. ⚠️ If you have a leftover `pending`
+device from an expired code, it is skipped: the first run's page published to
+it — 200, nothing reached anything. Delete stale ones in `/setup` anyway.
+
+**Verify:** within a minute the tick reports `policy: "sent"`, and
+`enforcer.health` (next step) shows the new version.
+
+---
+
+## 6. Watch it lock — the actual test
 
 ```sh
-sudo log stream --predicate 'process == "hpc-enforcerd"' --info
+sudo agent/scripts/watch.sh
 ```
 
-Expect, in order: the warnings at their lead times (banner at T-30/-15,
-modal at T-5/-1 — compressed if your window is close), then
-`enforcement.action_taken {action: lock}` at the boundary, and the screen
-locks.
+⚠️ **Not `log stream`** — the agent never writes to os_log, so that shows
+nothing and looks like a dead agent. `watch.sh` shows which build is
+installed, the base URL, sync's health, then every spool line and every
+change to `enforcer.health`.
+
+Expect, in order: the warnings at their lead times (compressed if the window
+is close), then `enforcement.action_taken {action: lock}` at the boundary,
+and the screen locks.
 
 ⚠️ Then it **re-locks every tick** while the window holds. That is not a
 bug: *"enforcement is the re-locking, not the lock."*
 
-Five minutes later you will see
-`DEV_ENFORCEMENT: shutdown suppressed (would have powered off)` on stderr
-instead of the machine turning off. **That line is the whole point of this
-run** — it proves the escalation fired and reached the last rung, without
-exercising it.
+Five minutes after the lock (the default grace) you will see
+`DEV_ENFORCEMENT: shutdown suppressed (would have powered off)` from the
+enforcer's stderr instead of the machine turning off. **That line is the
+whole point of this run** — it proves the escalation fired and reached the
+last rung, without exercising it. It needs the `Lock, then shut down`
+action, a warning actually delivered (someone logged in), and the window
+still open when the grace runs out — hence 8 minutes.
+
+**Get out early:** `sudo touch /var/db/homeparentcontrol/DISABLE` stops both
+the enforcer and the deadfall on their next tick. Booting out only
+`com.hpc.enforcerd` does not — the deadfall is a separate job that re-checks
+the schedule and locks by itself. Remove `DISABLE` afterwards.
 
 ---
 
-## 6. Grant an override — the product moment
+## 7. Grant an override — the product moment
 
 While the screen is locked, on your phone: open **`/`**, press **+30 min**.
 
@@ -141,25 +214,22 @@ alone it can take up to a minute, and that is correct.
 
 ⚠️ **The grant does not unlock the Mac**, and the UI says so in those words.
 The boundary moves, the predicate goes false, the enforcer stops re-locking,
-and she logs back in herself. Read the sentence on screen — if you walk away
-believing the Mac is now open, the wording failed and I want to know.
+and she logs back in herself.
 
 ---
 
-## 7. Check the reports — 2 min
+## 8. Check the reports — 2 min
 
-**`/reports`**. There will be little data after 40 minutes, and that is the
-thing to look at: an hour the Mac was not reporting must be **hatched**, not
-drawn as a zero. Zero usage and no data mean opposite things.
-
-**`/devices/<id>`** shows the 7-day timeline, the clock posture, and what
+**`/reports`**: an hour the Mac was not reporting must be **hatched**, not
+drawn as a zero. **`/devices/<id>`** shows the 7-day timeline and what
 actually happened.
 
 ---
 
 ## What "passed" means
 
-- [ ] The Mac enrolled and reached *checking in normally*
+- [ ] The Mac enrolled, reached *checking in normally*, and shows `0.1.0-dev`
+- [ ] A rule published from `/rules` reached it (`policy: "sent"`)
 - [ ] It locked at the boundary, and kept re-locking
 - [ ] The shutdown was **suppressed**, with the DEV line in the log
 - [ ] A grant went `Sent ✓ → Applied ✓` and the boundary moved
@@ -177,14 +247,17 @@ for j in deadfall enforcerd sync supervisor; do
 done
 sudo rm -f /usr/local/libexec/hpc-* /Library/LaunchDaemons/com.hpc.*.plist
 sudo rm -rf /var/db/homeparentcontrol
+
+# If this was your own Mac, put the screen-lock delay back:
+sysadminctl -screenLock <old value> -password -
 ```
 
 ⚠️ **Do not leave the `-dev` build installed.** It logs "would shut down"
 for ever and looks completely healthy. The device card shows `0.1.0-dev`,
 which is the tell.
 
-Then decommission the test device in the UI (`/devices/<id>` → Decommission,
-typed confirmation) so it is not left enrolled.
+Then decommission the test device in the UI (`/devices/<id>` →
+Decommission, typed confirmation) so it is not left enrolled.
 
 ---
 
@@ -192,12 +265,15 @@ typed confirmation) so it is not left enrolled.
 
 | Symptom | Look at |
 |---|---|
-| Never appears in the UI | `sudo log show --last 5m --predicate 'process == "hpc-sync"'`. Wrong base URL, or the code expired (60 min) |
+| Never appears in the UI | `sudo cat /var/db/homeparentcontrol/sync.health` — the table in step 4 |
 | Appears, health stays `UNENROLLED` | the liveness job runs every 60 s — wait a minute |
-| Enrolled but never locks | is the window today? `cat /var/db/homeparentcontrol/policy.current.json`. Check `DISABLE` is absent |
+| Enrolled, rules "published", policy never changes | which Mac did `/rules` say it published to? |
+| Enrolled but never locks | is the window **today**? Is `DISABLE` absent? `watch.sh` shows both |
+| "Locks" but a mouse wiggle brings the desktop back | `sysadminctl -screenLock status` is not `immediate` — step 2 |
 | Locks but no warnings | warnings need a console user; check you are logged in |
 | `NOT ENFORCING: shadow mode` | a soak marker is present. `sudo rm /var/db/homeparentcontrol/soak.json` — this is V-SHADOW-1 territory |
 | Card says *is NOT enforcing* | either DEGRADED (it cannot read its rules) or shadow mode. Both are honest; read which |
+| Card shows `0.1.0`, not `0.1.0-dev` | you installed the production pkg — it CAN power off. Have `sudo killall shutdown` ready |
 
 ⚠️ **Nothing in this run should ever power the Mac off.** If it does, you
 installed the production pkg — check the device card for a `-dev` suffix,

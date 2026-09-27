@@ -1,14 +1,23 @@
 # The punch list
 
-Everything outstanding in the project, in one place, as of **2026-09-21**.
+Everything outstanding in the project, in one place, as of **2026-09-26**.
 
 ✅ **The cluster deploy is done.** `homeparentcontrol` is Healthy on k3s, both
 ingress hosts answer, and all nine end-to-end tests pass against it with
 `HPC_BASE_URL` as the only change. What follows is what is left.
 
-**There is no code left to write.** Every item below needs hardware, a
-router, a browser, a push to a second repo, or a decision. That is why no
-milestone is `open` — see `CLAUDE.md`'s note on `awaiting-verification`.
+**One code item is waiting on a decision** — the screen-lock delay, below.
+Everything else needs hardware, a router, a browser, a push to a second repo,
+or a decision. That is why no milestone is `open` — see `CLAUDE.md`'s note on
+`awaiting-verification`.
+
+> **2026-09-22 — the first smoke test ran, and stalled.** Enrolled and ticked
+> HEALTHY for 24 hours, but never locked: twelve problems between "the code is
+> correct" and "it runs under launchd from a browser". Eleven are fixed (ADR
+> 0010, milestone 06's progress notes). The twelfth is the first decision
+> below. ⚠️ **The fixes to the web and API have not reached the cluster** —
+> that needs `ARCH_INFRA_TOKEN`. Until then the rules page there still cannot
+> publish.
 
 Grouped by *what you need in your hand*, because that is how these actually
 get done — not by milestone.
@@ -27,10 +36,16 @@ powering off**. It uses the safe build (`build-pkg.sh --dev`), so the real
 power-off stays a separate, later decision. Everything below is easier once
 this has worked once.
 
+⚠️ **Rewritten after the first run** — reinstall with the rebuilt pkg; the
+old one cannot say which variant it is and `install.sh` now refuses it. Needs
+`ARCH_INFRA_TOKEN` first, or publish step 5 from the browser console (the
+cluster's rules page still has the old bug).
+
 Then: [`v-series.md`](../agent/scripts/v-series.md) and
 [`cutover.md`](../agent/scripts/cutover.md).
 
-⚠️ **Do this on the mini, not the machine you work on.** Several of these
+⚠️ **The smoke test is safe on the machine you work on** (safe build, short
+window, SSH in from the Arch box). **The rest belongs on the mini** — several
 lock the screen and one powers the computer off.
 
 ### Session 1 — the isolation matrix (~30 min)
@@ -104,6 +119,9 @@ Verify from the Mac *before* deploying: `dig +short homeparentcontrol.arch.inter
       The app is deployed and running, but CI cannot bump its image tags, so
       a new commit does not roll — and `main` stays red, because
       `bump-arch-infra` fails hard rather than `exit 0`-ing (B3/A.22).
+      ⚠️ **It now also blocks the smoke-test fixes**: the rules page that can
+      publish, and the `/events` reader that stops dropping 47 % of events,
+      are committed but not deployed.
 - [ ] **Look at the UI on a phone.** Two minutes. The viewport tag, the
       44px targets and the single-column layout are all verified in the
       built output and pinned by tests — but nobody has *looked*.
@@ -136,13 +154,32 @@ Still to do:
 - [ ] **Provision the observability files** into the `observability-grafana`
       chart's values in `arch-infra`.
 - [ ] **Point the agent at the cluster** when you install it —
-      `HPC_BASE_URL=http://homeparentcontrol-api.arch.internal/api/agent/v1/`.
-      ✅ Already proven to need no code change: the full e2e suite passes
-      against the cluster with only that variable different.
+      `install.sh … --base-url http://homeparentcontrol-api.arch.internal/api/agent/v1/`.
+      ⚠️ Not `launchctl setenv` (SIP refuses it) and not a plist edit (the
+      next pkg upgrade undoes it) — ADR 0010.
 
 ---
 
 ## 🤔 Decisions — nobody can do these for you
+
+- [ ] ⛔ **The screen-lock delay makes the lock a no-op, and she can set it
+      without admin.** Found on the smoke test: the agent's primary lock is
+      `pmset displaysleepnow`, which only turns the display off. Whether
+      waking needs a password is the *logged-in user's* screen-lock delay —
+      it was **4 hours** on the test Mac. At any non-zero value the "lock" is
+      a black screen a mouse wiggle undoes, while `lock()` reports success
+      and the device card says it is enforcing. It is the shape of ADR 0009:
+      an ordinary setting with the effect of an off switch, and it needs no
+      admin, so it survives even the non-admin posture AR.1 keeps in reserve.
+
+      Options, each needing a measurement on the Mac first
+      (`verify-macos-claims`): **(a)** read the delay at boot and every tick
+      and report `DEGRADED` when it is not `immediate` — honest, but it only
+      tells you; **(b)** prefer `CGSession -suspend`, which switches to the
+      login window regardless of the delay — but it is reported gone on macOS
+      27, and whether it works from a root LaunchDaemon is unmeasured;
+      **(c)** both. Until then: check `sysadminctl -screenLock status` **as
+      her** before trusting a single bedtime (`cutover.md` step 0).
 
 - [ ] ⛔ **C6 — pick a notification channel.** *The only item in the project
       blocked on a decision rather than on time.*
@@ -192,6 +229,14 @@ blocked on.
   main conclusions. ⚠️ Do not accept the upgrade before re-running the
   V-series on it.
 - **The remaining cluster checks (C1–C11)** beyond C2, C6 and C8.
+- **A rules change publishes to one Mac at a time.** The rules page now
+  picks the right one (the edited child's, never a `pending` device) and
+  says which, with a picker when there are several — but a child with two
+  Macs needs two publishes. The calendar path already recompiles every
+  device; rules should too, with a C3 check per device.
+- **The sync daemon's own events have no clock-independent order.** They
+  carry `seq = -1` (ADR 0010) and sort by `ts`, which a clock step can
+  scramble. Enforcement records come from the enforcer and are unaffected.
 
 ✅ **Resolved since it was first recorded:** `telemetry.collect`'s defaults
 no longer starve the projector — the block is decoded and every default errs
@@ -201,10 +246,11 @@ toward collecting, with tests.
 
 ## If you do only three things
 
-1. **Back up `POLICY_SIGNING_KEY`** — sixty seconds, and losing it means
+1. **`ARCH_INFRA_TOKEN`** — two minutes. It turns `main` green, and it is now
+   what stands between the smoke-test fixes and the cluster.
+2. **Decide the screen-lock delay** — until then a bedtime "lock" may be a
+   black screen, and the dashboard cannot tell you.
+3. **Back up `POLICY_SIGNING_KEY`** — sixty seconds, and losing it means
    re-enrolling every Mac by hand.
-2. **V-PKG-1** — it can invalidate a design, and that is worth knowing early.
-3. **C6** — because right now nothing in this house tells anyone when
-   anything breaks.
 
-(And **`ARCH_INFRA_TOKEN`**: two minutes, and it turns `main` green.)
+(Then re-run the smoke test; then V-PKG-1 and C6.)

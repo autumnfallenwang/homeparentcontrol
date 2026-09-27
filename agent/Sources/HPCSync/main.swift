@@ -6,6 +6,8 @@ import HPCSyncKit
 // The sync daemon re-executes this same binary as the console user to read
 // the window-server session — see `SessionProbe`. In that mode it must not
 // open the queue, read a credential or touch the network.
+AgentVersion.handleFlag()
+
 if CommandLine.arguments.contains(SessionProbe.flag) {
     print(SessionProbe.report())
     exit(0)

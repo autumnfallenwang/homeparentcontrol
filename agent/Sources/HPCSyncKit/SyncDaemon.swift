@@ -15,7 +15,7 @@ import HPCCore
 /// stop. V6 is the proof: byte-identical enforcer logs with this daemon
 /// running and booted out.
 public enum SyncDaemon {
-    public static let version = "0.1.0"
+    public static let version = AgentVersion.current
 
     static var queue: Queue?
     static var client: Client?
@@ -131,13 +131,16 @@ public enum SyncDaemon {
 
     static func start() {
         queue = try? Queue()
-        guard let baseURL = resolveBaseURL() else {
-            FileHandle.standardError.write(
-                Data("hpc-sync: no base URL configured; not syncing\n".utf8))
-            return
+        client = makeClient()
+        if client == nil {
+            say("no base URL configured; write it to \(Paths.baseURL)"
+                + " (install.sh --base-url). Checking again every minute.")
         }
-        client = Client(
-            config: .init(baseURL: baseURL, token: DeviceState.loadCredential()?.token))
+    }
+
+    static func makeClient() -> Client? {
+        guard let baseURL = resolveBaseURL() else { return nil }
+        return Client(config: .init(baseURL: baseURL, token: DeviceState.loadCredential()?.token))
     }
 
     /// One timer, rescheduled after every tick — §4.2's "the agent has exactly
@@ -154,7 +157,20 @@ public enum SyncDaemon {
     @discardableResult
     static func tick() -> Int {
         tickSeq += 1
-        guard let queue, let client else { return Cadence.baseMs }
+        // ⚠️ Retried every tick, and said out loud. This used to be a bare
+        // `guard … else { return }` — a sync daemon started before its base
+        // URL existed gave up once at `start()` and then did nothing, with no
+        // health file, for as long as it ran.
+        if queue == nil { queue = try? Queue() }
+        if client == nil { client = makeClient() }
+        guard let queue else {
+            writeHealth(decision: "queue_unavailable")
+            return Cadence.baseMs
+        }
+        guard let client else {
+            writeHealth(decision: "no_base_url")
+            return Cadence.baseMs
+        }
 
         // ── 1. Take whatever the enforcer wrote. Always, even when halted:
         //       a queue that stops accepting would eventually push back into
@@ -173,12 +189,21 @@ public enum SyncDaemon {
         }
 
         // ── 3. Enrol if we have never been issued a credential.
+        //
+        // ⚠️ Every outcome writes `sync.health`. It used to write nothing on
+        // a failed enrolment, which made the first real smoke test's failure
+        // undiagnosable on the Mac — and a missing health file is exactly
+        // what the supervisor reads as a DEAD sync daemon.
         if DeviceState.loadCredential() == nil {
+            guard stagedEnrolmentCode() != nil else {
+                // Nothing to try, which is not a failure: no backoff, so a
+                // code the parent drops in is picked up within a minute.
+                writeHealth(decision: "awaiting_enrolment_code")
+                return Cadence.baseMs
+            }
             switch enrol(client) {
             case .success: break
-            case .failure:
-                cadence.consecutiveFailures += 1
-                return nextInterval()
+            case .failure(let error): return enrolmentFailed(error)
             }
         }
 
@@ -227,55 +252,6 @@ public enum SyncDaemon {
 
     static func nextInterval() -> Int {
         Cadence.next(cadence, now: Date()).intervalMs
-    }
-
-    // MARK: - Enrolment
-
-    static func enrol(_ client: Client) -> Result<Void, Error> {
-        guard let code = try? String(contentsOfFile: Paths.enrolmentCode, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines), !code.isEmpty
-        else { return .failure(Client.Transport.malformed("no enrolment code on disk")) }
-
-        do {
-            let response = try client.enroll([
-                "code": code,
-                "hardware_uuid": DeviceState.hardwareUUID(),
-                "hostname": DeviceState.hostname(),
-                "os_version": DeviceState.osVersion(),
-                "arch": DeviceState.arch(),
-                "agent_version": version,
-            ])
-            guard let deviceId = response["device_id"] as? String,
-                  let credential = response["credential"] as? [String: Any],
-                  let token = credential["token"] as? String
-            else { return .failure(Client.Transport.malformed("enrolment response")) }
-
-            try DeviceState.saveCredential(
-                .init(
-                    token: token,
-                    keyId: credential["key_id"] as? String ?? "",
-                    issuedAt: (credential["issued_at"] as? String)
-                        .flatMap(ISO8601DateFormatter.hpcParse) ?? Date(),
-                    rotateAfter: (credential["rotate_after"] as? String)
-                        .flatMap(ISO8601DateFormatter.hpcParse)))
-            try DeviceState.saveIdentity(
-                .init(deviceId: deviceId, hardwareUUID: DeviceState.hardwareUUID()))
-
-            if let keys = response["policy_signing_keys"] as? [[String: Any]] {
-                try? SigningKeys.save(keys)
-            }
-            client.updateToken(token)
-
-            // ⚠️ The code is single-use and its presence on disk is the only
-            // thing that would make the agent try to enrol again. Remove it
-            // the instant it has been exchanged.
-            try? FileManager.default.removeItem(atPath: Paths.enrolmentCode)
-            enqueueLocal(type: "agent.started", cls: .audit, data: ["enrolled": true])
-            return .success(())
-        } catch {
-            if let problem = error as? Client.Problem { handle(problem) }
-            return .failure(error)
-        }
     }
 
     // MARK: - The request body
@@ -741,15 +717,26 @@ public enum SyncDaemon {
         try? data.write(to: URL(fileURLWithPath: Paths.syncHealth), options: .atomic)
     }
 
-    /// `HPC_BASE_URL` in the plist, else `base_url` from enrolment.
-    static func resolveBaseURL() -> URL? {
-        if let raw = ProcessInfo.processInfo.environment["HPC_BASE_URL"],
-           let url = URL(string: raw) { return url }
-        guard let data = FileManager.default.contents(atPath: Paths.deviceIdentity),
-              let row = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let raw = row["base_url"] as? String
+    /// `$HPC_BASE_URL` if set, else the one line in `Paths.baseURL`.
+    ///
+    /// ⚠️ The file is the real mechanism; the variable is an override for
+    /// running the binary by hand. Found on the first real smoke test, where
+    /// neither documented route worked: `launchctl setenv` is refused under
+    /// SIP, and a URL edited into the installed plist is silently reset by
+    /// the next pkg upgrade, which reinstalls the plist. The old fallback,
+    /// `base_url` in `device.json`, could never fire — nothing wrote it.
+    static func resolveBaseURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        filePath: String = Paths.baseURL
+    ) -> URL? {
+        let fromFile = try? String(contentsOfFile: filePath, encoding: .utf8)
+        let raw = [environment["HPC_BASE_URL"], fromFile]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+        guard let raw, let url = URL(string: raw), let scheme = url.scheme,
+              ["http", "https"].contains(scheme), url.host != nil
         else { return nil }
-        return URL(string: raw)
+        return url
     }
 
     static func iso(_ date: Date) -> String {

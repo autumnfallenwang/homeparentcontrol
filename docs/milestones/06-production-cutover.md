@@ -110,6 +110,25 @@ requiring the paid Apple Developer Program.
   `agent/scripts/cutover.md`. New verification: **V-SHADOW-1**.
 - 2026-09-20: **`awaiting-verification`.** No code left. Every remaining exit criterion is an
   observation on the Mac mini — including the one the whole build deferred, a real power-off.
+- 2026-09-22: **First on-hardware smoke test** (the parent's MacBook Air, safe build, against the
+  cluster). Enrolled and ticked HEALTHY for 24 h unbroken (tick 630) — but **never locked**: the
+  published policy had no windows because the rules page could not publish. Twelve problems, none
+  in enforcement logic, all between "the code is correct" and "it runs under launchd from a browser":
+  a first install always failed (supervisor never bootstrapped); the Remote Login gate blocked a
+  build that cannot power off; the base URL had no working
+  mechanism (`setenv` refused by SIP, plist edits undone by upgrades); an expired code was retried
+  until the server burned it and the household's 20/h enrolment budget was gone; enrolment failures
+  wrote no health and no log; 39/83 events were dropped over `seq`; the rules page's device lookup
+  hit the web origin, and would have picked a dead `pending` device anyway; the safe build reported
+  the production version; the agent never writes to os_log, so every doc's `log stream` showed
+  nothing; and both the smoke test and this milestone's power-off step used `lock` windows, which
+  can never reach the shutdown rung. Also found: `pmset displaysleepnow` is a no-op when the user's
+  screen-lock delay is non-zero (it was 4 h) — **not fixed, needs a decision** (PUNCHLIST).
+- 2026-09-26: **All of the above fixed except the screen-lock delay**, each with a test that was seen
+  to fail against the original bug. Decisions in [ADR 0010](../adr/0010-first-hardware-run.md).
+  `smoke-test.md` rewritten around what the run taught: one-command install with `--base-url` and
+  `--code`, `agent/scripts/watch.sh` instead of `log stream`, and a `Lock, then shut down` window so
+  the DEV line can actually appear. Still `awaiting-verification`: the lock itself has not been seen.
 
 ## ⛔ What is left
 

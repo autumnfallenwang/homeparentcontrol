@@ -272,6 +272,40 @@ d("POST /events — per-event rejection", () => {
   });
 });
 
+/**
+ * ★ The first real smoke test posted 83 events and 39 were rejected as
+ * `schema`: the sync daemon's samples carry no `seq`, and the deadfall sends
+ * `-1` on purpose. The shapes below are exactly what those writers send.
+ */
+d("POST /events — seq outside the enforcer's sequence (ADR 0010)", () => {
+  it("stores a sample with no seq, as -1", async () => {
+    const f = await seed();
+    const { seq: _none, ...sample } = evt(1, { type: "app.usage_sample", class: "sample" });
+    const { body } = await post(f.token, batch(f.deviceId, [sample]));
+
+    expect(body.rejected_events).toEqual([]);
+    const [row] = await db.select().from(events).where(eq(events.deviceId, f.deviceId));
+    expect(row?.seq).toBe(-1);
+  });
+
+  it("stores the deadfall's lock record, seq -1, rather than dropping it", async () => {
+    // "Which process locked this Mac" is the first question a parent asks.
+    const f = await seed();
+    const { body } = await post(
+      f.token,
+      batch(f.deviceId, [evt(1, { type: "enforcement.action_taken", seq: -1 })]),
+    );
+    expect(body.rejected_events).toEqual([]);
+    expect(await storedCount(f.deviceId)).toBe(1);
+  });
+
+  it("still names the failing field when a schema rejection does happen", async () => {
+    const f = await seed();
+    const { body } = await post(f.token, batch(f.deviceId, [evt(1, { seq: -7 })]));
+    expect((body.rejected_events as { reason: string }[])[0]?.reason).toBe("schema");
+  });
+});
+
 /** R8 — the rule that makes D.1 and D.2 safe to defer. */
 d("POST /events — R8, store first", () => {
   it("stores an unknown type verbatim rather than rejecting it", async () => {

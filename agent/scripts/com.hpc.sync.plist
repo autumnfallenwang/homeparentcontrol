@@ -23,12 +23,13 @@
     <!-- The daemon owns its own cadence (§4.2's one timer), so launchd must
          not also have an opinion. No StartInterval. -->
 
-    <key>EnvironmentVariables</key>
-    <dict>
-        <!-- Set by the installer. Plain HTTP is X4, accepted. -->
-        <key>HPC_BASE_URL</key>
-        <string>http://hpc.local/api/agent/v1/</string>
-    </dict>
+    <!-- ⚠️ NO HPC_BASE_URL here. The base URL lives in
+         /var/db/homeparentcontrol/base_url, written by `install.sh
+         --base-url`. A value in this file is overwritten by every pkg
+         upgrade (the payload reinstalls it), and `launchctl setenv` is
+         refused under SIP — the first real smoke test hit both. The
+         variable still overrides the file if set, for running by hand.
+         Plain HTTP is X4, accepted. -->
 
     <key>StandardErrorPath</key>
     <string>/var/log/homeparentcontrol/sync.log</string>

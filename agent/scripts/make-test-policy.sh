@@ -2,8 +2,17 @@
 # Install a signed test policy whose window opens a couple of minutes from now,
 # so a V-series run does not mean waiting until 21:30 to learn anything.
 #
-#   sudo agent/scripts/make-test-policy.sh [minutes-ahead] [minutes-long]
-#   sudo agent/scripts/make-test-policy.sh 2 3     # opens in 2 min, CLOSES after 3
+#   sudo agent/scripts/make-test-policy.sh [minutes-ahead] [minutes-long] [lock|shutdown]
+#   sudo agent/scripts/make-test-policy.sh 2 3            # opens in 2 min, CLOSES after 3
+#   sudo agent/scripts/make-test-policy.sh 2 5 shutdown   # cutover.md §3 — the real power-off
+#
+# ⚠️ `shutdown` is the ONLY way this script can reach the last rung. The
+# ladder escalates only for a window whose action is "shutdown"
+# (`Ladder.swift`), so a `lock` window never powers off and never prints the
+# safe build's "DEV_ENFORCEMENT: shutdown suppressed" either. With `shutdown`
+# the grace is 60 s rather than 300, so the escalation lands inside a short
+# window. On the SAFE build it is a log line; on a production build it
+# POWERS THE MAC OFF — have `sudo killall shutdown` ready.
 #
 # ⚠️ Run with sudo — everything under /var/db/homeparentcontrol is root-owned.
 # ⚠️ Generates its OWN keypair. This is a test fixture, not the production key;
@@ -25,6 +34,12 @@ set -euo pipefail
 ROOT=/var/db/homeparentcontrol
 MINUTES_AHEAD="${1:-2}"
 MINUTES_LONG="${2:-3}"
+ACTION="${3:-lock}"
+case "$ACTION" in
+  lock) GRACE_S=300 ;;
+  shutdown) GRACE_S=60 ;;
+  *) echo "action must be lock or shutdown, not '$ACTION'"; exit 1 ;;
+esac
 
 [ "$(id -u)" -eq 0 ] || { echo "run with sudo"; exit 1; }
 mkdir -p "$ROOT/spool"
@@ -38,7 +53,7 @@ UNTIL=$(date -v+"$((MINUTES_AHEAD + MINUTES_LONG))"M +%H:%M)
 DAY=$(date +%a | tr '[:upper:]' '[:lower:]')
 TZNAME=$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')
 
-echo "window: $FROM -> $UNTIL on $DAY, zone $TZNAME"
+echo "window: $FROM -> $UNTIL on $DAY, zone $TZNAME, action $ACTION (grace ${GRACE_S}s)"
 
 # Sign it exactly as the server does: compact JWS, EdDSA, kid = RFC 7638
 # thumbprint of the public JWK.
@@ -65,10 +80,10 @@ const doc = {
     days: [process.argv[5]],
     restricted_from: process.argv[2],
     restricted_until: process.argv[3],
-    // ⚠️ `lock`, never `shutdown`. Escalation is tested separately and
-    // deliberately, not as a side effect of every other row in the matrix.
-    action: "lock",
-    action_options: { shutdown_grace_s: 300, escalate_after_failures: 3 },
+    // ⚠️ `lock` unless asked. Escalation is tested separately and
+    // deliberately (cutover.md §3), not as a side effect of every V-row.
+    action: process.argv[7],
+    action_options: { shutdown_grace_s: Number(process.argv[8]), escalate_after_failures: 3 },
     warnings: [{ lead_minutes: 1, channel: "modal" }],
   }]},
   overrides: [],
@@ -84,7 +99,7 @@ fs.writeFileSync(process.argv[6] + "/policy.lkg.json",     header + "." + payloa
 fs.writeFileSync(process.argv[6] + "/policy_signing_keys.json",
   JSON.stringify([{ kid, kty: jwk.kty, crv: jwk.crv, x: jwk.x, alg: "EdDSA", use: "sig" }]));
 console.log("kid:", kid);
-' "$TMP/key.pem" "$FROM" "$UNTIL" "$TZNAME" "$DAY" "$ROOT"
+' "$TMP/key.pem" "$FROM" "$UNTIL" "$TZNAME" "$DAY" "$ROOT" "$ACTION" "$GRACE_S"
 
 chmod 600 "$ROOT"/policy.*.json
 chmod 644 "$ROOT/policy_signing_keys.json"

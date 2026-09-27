@@ -23,7 +23,7 @@ import HPCCore
 ///   9. health
 /// ```
 enum Enforcer {
-    static let version = "0.1.0"
+    static let version = AgentVersion.current
     static let tickInterval: TimeInterval = 60
 
     static var ladderState = Ladder.State()
@@ -211,6 +211,8 @@ enum Enforcer {
 // The tick waits on a `DispatchSourceTimer`, and the signal on a
 // `DispatchSourceSignal` — both interruptible primitives the handler can
 // break. Never `Thread.sleep`.
+AgentVersion.handleFlag()
+
 signal(SIGTERM, SIG_IGN)
 signal(SIGINT, SIG_IGN)
 

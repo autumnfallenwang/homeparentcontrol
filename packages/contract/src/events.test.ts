@@ -41,6 +41,24 @@ describe("event envelope — R8", () => {
   it("rejects a malformed event_id — the idempotency key must be exact", () => {
     expect(eventEnvelope.safeParse({ ...base, event_id: "not-a-uuid" }).success).toBe(false);
   });
+  // ★ The first real smoke test: 39 of 83 events dropped as `schema`, because
+  // three writers could never satisfy a required, nonnegative `seq`.
+  describe("seq outside the enforcer's sequence (ADR 0010)", () => {
+    it("reads an absent seq as -1 — the sync daemon's samples and audits", () => {
+      const { seq: _omitted, ...withoutSeq } = base;
+      expect(eventEnvelope.parse(withoutSeq).seq).toBe(-1);
+    });
+
+    it("accepts the deadfall's -1 marker verbatim", () => {
+      expect(eventEnvelope.parse({ ...base, type: "enforcement.action_taken", seq: -1 }).seq).toBe(
+        -1,
+      );
+    });
+
+    it("still rejects anything below the marker", () => {
+      expect(eventEnvelope.safeParse({ ...base, seq: -2 }).success).toBe(false);
+    });
+  });
 });
 
 describe("events request", () => {

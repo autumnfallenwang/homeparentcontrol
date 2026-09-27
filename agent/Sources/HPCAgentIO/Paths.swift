@@ -37,6 +37,13 @@ public enum Paths {
     /// The one-time enrolment code, dropped here by the installer and deleted
     /// the moment it is exchanged.
     public static var enrolmentCode: String { "\(root)/enrolment_code" }
+    /// Where a code the server rejected is moved, so it is never sent again
+    /// but is still there to read. Only a NEW `enrolment_code` restarts it.
+    public static var rejectedEnrolmentCode: String { "\(root)/enrolment_code.rejected" }
+    /// The control plane's agent base URL, one line. Written by `install.sh
+    /// --base-url`. Lives HERE, not in the plist, because every pkg upgrade
+    /// reinstalls the plist — and `launchctl setenv` is refused under SIP.
+    public static var baseURL: String { "\(root)/base_url" }
 
     // ── The supervisor's.
     public static var pkgCache: String { "\(root)/pkgs" }

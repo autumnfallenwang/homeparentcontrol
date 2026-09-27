@@ -23,14 +23,33 @@
 # without the first run being the one that powers a machine off.
 #
 # Three things make a dev pkg impossible to mistake for a production one, and
-# all three are deliberate: the VERSION carries a `-dev` suffix (so it shows
-# in `pkgutil --pkg-info` and in the `agent_version` every sync reports and
-# the parent UI displays), the filename carries `-DEV`, and `install.sh`
-# refuses it without `--allow-dev`. A safe binary installed by accident is an
-# agent that logs "would shut down" for ever and looks completely healthy.
+# all three are deliberate: the VERSION carries a `-dev` suffix (in
+# `pkgutil --pkg-info`, and — because `AgentVersion.current` derives it from
+# the same `DEV_ENFORCEMENT` flag — in every binary's `--version`, in the
+# `agent_version` every sync reports, and on the parent's device card), the
+# filename carries it, and `install.sh` refuses it without `--allow-dev`. A
+# safe binary installed by accident is an agent that logs "would shut down"
+# for ever and looks completely healthy.
+#
+# ⚠️ Until the first real smoke test, "every binary" was false: the suffix
+# reached only the pkg, and the installed safe build reported plain `0.1.0`.
+# So this script now PROVES it — see the check after the build.
 set -euo pipefail
 
 VERSION="${1:?usage: build-pkg.sh <version> [--dev]}"
+
+# ── The pkg version must be the version the binaries report.
+#
+# ⚠️ If they differ, the supervisor's `isNewer(desired, running)` compares the
+# pkg's version against the binary's self-report, finds the pkg newer every
+# tick, and reinstalls it for ever. One source of truth, checked here.
+SRC_VERSION="$(sed -n 's/.*static let base = "\(.*\)"/\1/p' \
+  "$(dirname "$0")/../Sources/HPCAgentIO/AgentVersion.swift" | head -1)"
+if [ "$VERSION" != "$SRC_VERSION" ]; then
+  echo "ERROR: asked for $VERSION but AgentVersion.base is '$SRC_VERSION'." >&2
+  echo "  Bump agent/Sources/HPCAgentIO/AgentVersion.swift, not just this argument." >&2
+  exit 1
+fi
 DEV_FLAGS=""
 SUFFIX=""
 if [ "${2:-}" = "--dev" ]; then
@@ -56,6 +75,22 @@ echo "── building release binaries${SUFFIX:+ (SAFE VARIANT)}"
 swift build -c release --package-path agent $DEV_FLAGS >/dev/null
 BIN="$(swift build -c release --package-path agent --show-bin-path)"
 
+# ── ★ Ask every binary what it is, before any of them is packaged.
+#
+# This is the check that would have caught the smoke test's `0.1.0` safe
+# build. It also catches a STALE binary: release and dev builds share one
+# `.build` directory, so an incremental build that did not recompile under
+# the new flag would ship the wrong variant with the right filename.
+for exe in HPCEnforcer HPCSync HPCDeadfall HPCSupervisor; do
+  REPORTED="$("$BIN/$exe" --version 2>/dev/null || true)"
+  if [ "$REPORTED" != "$VERSION" ]; then
+    echo "ERROR: $exe reports '${REPORTED:-nothing}', but this pkg is $VERSION." >&2
+    echo "  The binaries do not match the variant being packaged. Refusing." >&2
+    exit 1
+  fi
+done
+echo "   ✔ all four binaries report $VERSION"
+
 rm -rf "$STAGE"
 mkdir -p "$STAGE/usr/local/libexec" "$STAGE/Library/LaunchDaemons"
 
@@ -63,9 +98,10 @@ install -m 755 "$BIN/HPCEnforcer"   "$STAGE/usr/local/libexec/hpc-enforcerd"
 install -m 755 "$BIN/HPCSync"       "$STAGE/usr/local/libexec/hpc-sync"
 install -m 755 "$BIN/HPCDeadfall"   "$STAGE/usr/local/libexec/hpc-deadfall"
 # ⚠️ A.24 — the supervisor is in the payload but NEVER self-applies. The
-# postinstall below deliberately does not kickstart com.hpc.supervisor: it is
-# "the one component that cannot be rolled back in place", so a supervisor
-# bump is an attended install, a couple of times a year.
+# postinstall below loads it only when launchd has never heard of it (a first
+# install) and never boots it out or restarts it: it is "the one component
+# that cannot be rolled back in place", so a supervisor bump is an attended
+# install, a couple of times a year.
 install -m 755 "$BIN/HPCSupervisor" "$STAGE/usr/local/libexec/hpc-supervisor"
 
 for job in enforcerd sync supervisor; do
@@ -93,6 +129,15 @@ for job in enforcerd sync; do
 done
 # ⚠️ com.hpc.supervisor is NOT restarted here. A.24: the updater does not
 # update itself, and restarting it mid-install is how it would.
+#
+# ★ But it must be LOADED once, and on a first install nothing else ever
+# loads it. `install.sh` checks all three jobs, so every first install failed
+# — found on the first real smoke test. `print` succeeds iff launchd already
+# knows the job, which is exactly the supervisor-driven upgrade (it is the
+# process running this script), so there it is a no-op: never a bootout,
+# never a restart. ADR 0010.
+launchctl print system/com.hpc.supervisor >/dev/null 2>&1 \
+  || launchctl bootstrap system /Library/LaunchDaemons/com.hpc.supervisor.plist || true
 exit 0
 POST
 chmod 755 "$OUT/scripts/postinstall"

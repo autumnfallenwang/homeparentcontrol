@@ -82,10 +82,15 @@ for test_name in \
   "rotates" \
   "badCredentialHaltsSyncOnly" \
   "drainsAfterAnOutage" \
-  "unreachableIsNotAnAction"
+  "unreachableIsNotAnAction" \
+  "deadCodesAreTerminal"
 do
   if [ "$FIRST" -eq 0 ]; then sleep "$PACE"; fi
   FIRST=0
+  # ⚠️ This one sends FOUR enrolments on its own, so it gets an empty
+  # per-IP minute first. A 429 here would read as "the agent retries a dead
+  # code" — the exact bug it exists to catch — when it was only the limiter.
+  if [ "$test_name" = "deadCodesAreTerminal" ]; then sleep 61; fi
 
   SEED="$(pnpm --filter @hpc/api exec tsx --env-file="$ENV_FILE" \
           "$ROOT/apps/api/src/scripts/seed-e2e.ts" | grep '^HPC_E2E_')"

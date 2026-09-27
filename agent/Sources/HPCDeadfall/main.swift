@@ -22,7 +22,7 @@ import HPCCore
 /// deliver to and no way to follow through, and an unattended `shutdown` from
 /// a one-shot with no grace period is how you lose a child's homework.
 enum Deadfall {
-    static let version = "0.1.0"
+    static let version = AgentVersion.current
 
     static func run() -> Int32 {
         // ── 1. The kill switch, first and fresh, exactly as §3.2 orders it
@@ -121,4 +121,5 @@ enum Deadfall {
     }
 }
 
+AgentVersion.handleFlag()
 exit(Deadfall.run())

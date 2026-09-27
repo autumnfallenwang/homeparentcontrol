@@ -23,8 +23,21 @@ export const eventEnvelope = z.object({
   class: eventClass,
   /** Advisory only — the server records `received_at` as authoritative. */
   ts: instant,
-  /** Ordering is clock-independent: `(boot_id, seq)`. */
-  seq: z.int().nonnegative(),
+  /**
+   * Ordering is clock-independent: `(boot_id, seq)` — the ENFORCER's per-boot
+   * counter, which is what gap detection runs on.
+   *
+   * ⚠️ `-1` means "not in the enforcer's sequence", and an absent `seq` is
+   * read as `-1`. Found on the first real smoke test, where 39 of 83 events
+   * were dropped as `schema`: this used to be `nonnegative()` and required,
+   * while three writers could never satisfy it — the deadfall sends `-1` on
+   * purpose (it has no tick counter, and "which process locked this Mac" is
+   * the first question a parent asks), and the sync daemon's own samples and
+   * audits carry no `seq` at all. Rejecting them lost exactly the audit
+   * records the deadfall exists to leave. R1: the reader relaxes, so agents
+   * already installed start landing without an upgrade. See ADR 0010.
+   */
+  seq: z.int().min(-1).default(-1),
   /**
    * The boot this event was RECORDED in, when it differs from the batch's.
    *

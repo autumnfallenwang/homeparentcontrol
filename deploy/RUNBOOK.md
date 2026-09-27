@@ -282,14 +282,19 @@ than no alert because it is trusted.
 
 ## 9. Point the agent at the cluster
 
-⚠️ **One environment variable, no code change** — hypothesis H1, and this is
-where it either pays off or does not.
+⚠️ **One setting, no code change** — hypothesis H1, and this is where it
+either pays off or does not.
 
 ```sh
-sudo launchctl setenv HPC_BASE_URL http://homeparentcontrol-api.arch.internal/api/agent/v1/
-# or edit EnvironmentVariables in /Library/LaunchDaemons/com.hpc.sync.plist
-sudo launchctl kickstart -k system/com.hpc.sync
+sudo agent/scripts/install.sh <pkg> \
+  --base-url http://homeparentcontrol-api.arch.internal/api/agent/v1/ \
+  --code HPC-XXXX-XXXX-XXXX
 ```
+
+It writes `/var/db/homeparentcontrol/base_url`, which sync re-reads every
+tick. ⚠️ **Not `launchctl setenv`** — SIP refuses it in the system domain —
+and **not an edit to the installed plist**, which the next pkg upgrade
+silently reinstalls. The first smoke test found both (ADR 0010).
 
 **Verify:** the device appears on `http://homeparentcontrol.arch.internal`
 and its health goes HEALTHY within three ticks.

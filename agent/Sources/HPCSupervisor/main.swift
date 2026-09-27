@@ -22,7 +22,7 @@ import HPCCore
 ///
 /// All judgement lives in `HPCCore.SupervisorPolicy`. This file is the hands.
 enum Supervisor {
-    static let version = "0.1.0"
+    static let version = AgentVersion.current
     static let tickInterval: TimeInterval = 60
 
     static var state = SupervisorPolicy.State()
@@ -332,6 +332,8 @@ enum Supervisor {
         return task.terminationStatus
     }
 }
+
+AgentVersion.handleFlag()
 
 signal(SIGTERM, SIG_IGN)
 let queue = DispatchQueue(label: "hpc.supervisor", qos: .utility)

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Banner,
   Button,
@@ -13,15 +13,18 @@ import {
 } from "../../components/ui.js";
 import { DAY_LABEL, DAYS, dayAndTime } from "../../lib/format.js";
 import {
+  type DeviceSummary,
   getRules,
   getRulesDiff,
   getRulesHistory,
+  listDevices,
   publishRules,
   type RulesPayload,
   type RuleWindow,
   restoreVersion,
   saveRules,
 } from "../../lib/parent-api.js";
+import { publishTargets } from "../../lib/publish-target.js";
 
 /**
  * `/rules` — draft → diff → publish, plus `/rules/history` inline.
@@ -36,6 +39,8 @@ export default function RulesPage() {
   const [rules, setRules] = useState<RulesPayload | null>(null);
   const [windows, setWindows] = useState<RuleWindow[]>([]);
   const [setId, setSetId] = useState<string | null>(null);
+  const [childId, setChildId] = useState<string | null>(null);
+  const [devices, setDevices] = useState<DeviceSummary[] | null>(null);
   const [deviceId, setDeviceId] = useState<string>("");
   const [diff, setDiff] = useState<Awaited<ReturnType<typeof getRulesDiff>> | null>(null);
   const [history, setHistory] = useState<Awaited<ReturnType<typeof getRulesHistory>> | null>(null);
@@ -51,6 +56,7 @@ export default function RulesPage() {
         const first = payload.policy_sets[0];
         if (first) {
           setSetId(first.id);
+          setChildId(first.child_id);
           setWindows(first.windows);
         }
       } catch (caught) {
@@ -60,16 +66,31 @@ export default function RulesPage() {
   }, []);
 
   // A device is needed to compile against — the document is per device.
+  //
+  // ⚠️ Through the API client, like every other call. This used to be a raw
+  // `fetch("/api/parent/v1/devices")`: a RELATIVE path, which resolves against
+  // the web origin, gets Next.js's 404, and returned early in silence. So
+  // `deviceId` was never set, the diff never loaded, and the Publish button
+  // never rendered — the one page whose job is to change bedtime could save a
+  // draft and never send it. `api-origin.test.ts` now forbids the shape.
   useEffect(() => {
     void (async () => {
-      const response = await fetch("/api/parent/v1/devices", { credentials: "include" }).catch(
-        () => null,
-      );
-      if (!response?.ok) return;
-      const body = (await response.json()) as { devices: { id: string }[] };
-      setDeviceId((current) => current || (body.devices[0]?.id ?? ""));
+      try {
+        setDevices((await listDevices()).devices);
+      } catch (caught) {
+        setError(caught);
+      }
     })();
   }, []);
+
+  const targets = useMemo(() => publishTargets(devices ?? [], childId), [devices, childId]);
+
+  // Keep the parent's pick while it is still valid; otherwise the best target.
+  useEffect(() => {
+    setDeviceId((current) =>
+      targets.some((device) => device.id === current) ? current : (targets[0]?.id ?? ""),
+    );
+  }, [targets]);
 
   const loadDiff = useCallback(async () => {
     if (!deviceId) return;
@@ -179,6 +200,37 @@ export default function RulesPage() {
             </p>
           ) : null}
         </Card>
+
+        {/*
+          ⚠️ Say WHICH Mac, always. A publish that lands on the wrong device
+          returns 200 and changes nothing the child can see — the parent has
+          no other way to notice.
+        */}
+        {devices === null ? null : targets.length === 0 ? (
+          <Banner tone="warn" title="No Mac to publish to yet">
+            Save your rules now — a Mac receives the saved rules automatically when it finishes
+            enrolling. After that, changes are published from here. Add a Mac or check its code in{" "}
+            <Link href="/setup">Setup</Link>.
+          </Banner>
+        ) : targets.length === 1 ? (
+          <p className="text-sm text-slate-600">
+            Changes publish to <strong>{targets[0]?.label ?? "this Mac"}</strong>.
+          </p>
+        ) : (
+          <Field label="Publish to">
+            <select
+              className={inputClass}
+              value={deviceId}
+              onChange={(event) => setDeviceId(event.target.value)}
+            >
+              {targets.map((device) => (
+                <option key={device.id} value={device.id}>
+                  {device.label ?? device.id}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
 
         {diff ? (
           <Card tone={diff.confirm_immediate_effect ? "warn" : "plain"}>

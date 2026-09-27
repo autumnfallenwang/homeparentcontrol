@@ -361,6 +361,17 @@ export const getReports = (params: {
 
 // ── Setup and settings
 
+/** One row of `GET /devices` — every device that is not decommissioned. */
+export interface DeviceSummary {
+  id: string;
+  label: string | null;
+  status: string;
+  childId: string | null;
+  healthState: string | null;
+}
+
+export const listDevices = () => call<{ devices: DeviceSummary[] }>("/devices");
+
 export const getSetup = () =>
   call<{
     children: { id: string; displayName: string; timezone: string | null }[];

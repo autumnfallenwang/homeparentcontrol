@@ -78,7 +78,7 @@ always "it still locks"** — that is the whole point.
 | **V1** | Cluster off | Locks at the boundary | `kubectl scale --replicas=0` the api deployment, or just never start it |
 | **V2** | Cable out | Locks at the boundary | Turn off Wi-Fi and unplug Ethernet before the window opens |
 | **V3** | DNS blackholed | Locks at the boundary | `sudo dscacheutil -flushcache`; point `/etc/hosts` for the API host at `127.0.0.1` |
-| **V4** | Server returns 500 forever | Locks at the boundary | Point `HPC_BASE_URL` at a stub returning 500 |
+| **V4** | Server returns 500 forever | Locks at the boundary | Point `base_url` at a stub returning 500 (as in V5, below) |
 | **V5** | Server accepts then hangs 120 s | Locks at the boundary — **proves total sync timeout < one tick** | Below |
 | **V6** | `launchctl bootout system/com.hpc.sync` | **Byte-identical enforcer logs** with and without sync — the direct proof | Below |
 | **V7** | Disk full | Locks at the boundary; telemetry is lost, enforcement is not | `mkfile` a large file, or fill the spool volume |
@@ -97,8 +97,9 @@ The one that most directly exercises the LKG path.
 
 ```sh
 # Confirm it is enforcing normally first, or you prove nothing.
-sudo log stream --predicate 'process == "hpc-enforcerd"' --info &
-cat /var/db/homeparentcontrol/enforcer.health          # last_decision should change at the boundary
+# ⚠️ Not `log stream` — the agent never writes to os_log, so it shows nothing.
+sudo agent/scripts/watch.sh &
+sudo cat /var/db/homeparentcontrol/enforcer.health     # last_decision should change at the boundary
 
 # Break the current policy.
 sudo chmod 000 /var/db/homeparentcontrol/policy.current.json
@@ -198,7 +199,10 @@ while True:
 ```
 
 ```sh
-sudo launchctl setenv HPC_BASE_URL http://127.0.0.1:8088/api/agent/v1/
+# ⚠️ Not `launchctl setenv` — SIP refuses it in the system domain. The base
+# URL is a file; a restart makes sync re-read it.
+sudo cp /var/db/homeparentcontrol/base_url /var/db/homeparentcontrol/base_url.real
+echo http://127.0.0.1:8088/api/agent/v1/ | sudo tee /var/db/homeparentcontrol/base_url
 sudo launchctl kickstart -k system/com.hpc.sync
 sudo agent/scripts/make-test-policy.sh
 sleep 420

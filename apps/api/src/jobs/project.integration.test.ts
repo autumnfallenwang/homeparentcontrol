@@ -386,6 +386,17 @@ d("projector — session_spans", () => {
   });
 });
 
+/**
+ * ⚠️ The fixtures are FIXED dates (2026-09-20/21) and `rollUpDaily` only looks
+ * back 3 days from `Date.now()` by default. These tests passed when written
+ * and began failing on their own a few days later, finding no rows — a time
+ * bomb, invisible to CI because CI runs `test:fast`, which skips integration
+ * tests. Found 2026-09-26. The window is not what these tests are about, so
+ * they open it wide instead of making the dates relative: the dates ARE the
+ * test (a UTC instant on either side of a local midnight).
+ */
+const EVERY_FIXTURE = { sinceDays: 36_500 };
+
 d("rollup — usage_daily", () => {
   /**
    * ★ "LOCAL day in policy.timezone, NOT date_trunc('day', ts) in UTC. Get
@@ -402,7 +413,7 @@ d("rollup — usage_daily", () => {
     );
 
     await projectEvents();
-    await rollUpDaily();
+    await rollUpDaily(EVERY_FIXTURE);
 
     const [row] = await db.select().from(usageDaily).where(eq(usageDaily.deviceId, f.deviceId));
     expect(row?.localDay).toBe("2026-09-20");
@@ -420,7 +431,7 @@ d("rollup — usage_daily", () => {
     );
 
     await projectEvents();
-    await rollUpDaily();
+    await rollUpDaily(EVERY_FIXTURE);
 
     const [row] = await db.select().from(usageDaily).where(eq(usageDaily.deviceId, f.deviceId));
     expect(row?.localDay).toBe("2026-09-21");
@@ -430,8 +441,8 @@ d("rollup — usage_daily", () => {
     const f = await seed();
     await emit(f, "app.usage_sample", { bundle_id: "a", foreground_s: 60, active_s: 60 });
     await projectEvents();
-    await rollUpDaily();
-    await rollUpDaily();
+    await rollUpDaily(EVERY_FIXTURE);
+    await rollUpDaily(EVERY_FIXTURE);
 
     const rows = await db.select().from(usageDaily).where(eq(usageDaily.deviceId, f.deviceId));
     expect(rows).toHaveLength(1);

@@ -87,6 +87,35 @@ struct EndToEndTests {
         }
     }
 
+    /// ★ The real server's answers to a dead code, fed through the policy.
+    ///
+    /// `EnrolmentPolicy` hard-codes which statuses are terminal. If `/enroll`
+    /// ever answered a dead code with something else, the daemon would go
+    /// back to retrying it until the server burned it — the first smoke
+    /// test's household-wide lockout. This pins the two sides together.
+    @Test("★ every dead-code answer from /enroll is one the agent stops retrying",
+          .enabled(if: enabled))
+    func deadCodesAreTerminal() throws {
+        _ = try Self.enrolled()
+        let client = Client(config: .init(baseURL: try #require(Self.baseURL)))
+        let used = try #require(Self.code)
+        let attempts: [(String, [String: Any])] = [
+            ("consumed", ["code": used, "hardware_uuid": "E2E-second-machine"]),
+            ("unknown", ["code": "HPC-0000-0000-0000", "hardware_uuid": "E2E-nobody"]),
+            ("malformed", ["hardware_uuid": "E2E-no-code"])
+        ]
+        for (label, body) in attempts {
+            do {
+                _ = try client.enroll(body)
+                Issue.record("\(label): enrolment unexpectedly succeeded")
+            } catch let problem as Client.Problem {
+                #expect(
+                    EnrolmentPolicy.classify(status: problem.status) == .rejected,
+                    "\(label) answered \(problem.status), which the agent would retry")
+            }
+        }
+    }
+
     // MARK: - ★ The tick
 
     @Test("★ a durable credential drives a real sync", .enabled(if: enabled))

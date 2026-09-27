@@ -31,6 +31,25 @@ Also confirm you can get back in:
 sudo systemsetup -getremotelogin     # must say: Remote Login: On
 ```
 
+If it is off: **System Settings → General → Sharing → Remote Login**. ⚠️ Not
+`sudo systemsetup -setremotelogin on`, which needs Full Disk Access for the
+terminal even under sudo and fails with a message that reads like a sudo
+problem.
+
+And confirm the lock will actually lock — **logged in as her**, because it is
+a per-user setting:
+
+```sh
+sysadminctl -screenLock status       # must say: immediate
+```
+
+⚠️ The agent's primary lock is `pmset displaysleepnow`, which only turns the
+display off. With a password delay — the smoke test found four hours on the
+parent's Mac — that "lock" is a black screen a mouse wiggle undoes, while the
+agent reports `action: lock` and looks healthy. **It is her setting, and it
+needs no admin to change**, so this is also the easiest bypass in the system.
+See `docs/PUNCHLIST.md` — the agent does not yet check it.
+
 ⚠️ Under `shutdown` there is **no remote recovery path** — you cannot SSH
 into a machine that is off. Remote Login is what makes the 300-second grace
 a real recovery budget instead of a walk upstairs. `install.sh` refuses to
@@ -64,8 +83,14 @@ which is why the agent ships two lock paths and self-tests both at boot.
 ## 2. Install
 
 ```sh
-sudo agent/scripts/install.sh
+sudo agent/scripts/install.sh \
+  --base-url http://homeparentcontrol-api.arch.internal/api/agent/v1/ \
+  --code HPC-XXXX-XXXX-XXXX
 ```
+
+Create the code in `/setup` **immediately** before running this — it expires
+in 60 minutes. `--base-url` is written to `/var/db/homeparentcontrol/base_url`,
+which no pkg upgrade touches (ADR 0010).
 
 It builds a release pkg (⚠️ **without** `-DDEV_ENFORCEMENT` — the real
 shutdown, not the log line), installs it, and then refuses to finish unless:
@@ -115,15 +140,21 @@ project has been exercised; this has not.**
 ```sh
 # Second terminal, ready:  sudo killall shutdown
 
-# A window that opens in two minutes, with a SHORT grace so you are not
-# waiting five minutes to learn anything.
-sudo agent/scripts/make-test-policy.sh
+# A window that opens in two minutes, action SHUTDOWN, 60 s grace.
+# ⚠️ The `shutdown` argument is the whole test: the ladder escalates only for
+# a window whose action is "shutdown", and the script defaults to `lock`.
+sudo agent/scripts/make-test-policy.sh 2 5 shutdown
 sudo launchctl kickstart -k system/com.hpc.enforcerd
-sudo log stream --predicate 'process == "hpc-enforcerd"' --info
+sudo agent/scripts/watch.sh      # NOT `log stream`: the agent never writes to os_log
 ```
 
+⚠️ `make-test-policy.sh` installs its OWN signing key, so afterwards the
+server's policies will not verify until you re-enrol or restore
+`policy_signing_keys.json`. Back it up first:
+`sudo cp /var/db/homeparentcontrol/policy_signing_keys.json ~/keys.bak`.
+
 Watch for, in order: the warnings at their lead times, `action_taken
-{action: lock}` at the boundary, then — 300 s later, if the predicate still
+{action: lock}` at the boundary, then — 60 s later, if the predicate still
 holds — `action_taken {action: shutdown}` and the machine powering off.
 
 **Pass:** the Mac is off, and `/var/db/homeparentcontrol/spool/` records the
@@ -149,7 +180,7 @@ and each is reported as `enforcement.shadow_decision`.
 
 ```sh
 cat /var/db/homeparentcontrol/soak.json      # version, started_at, deadline
-sudo log stream --predicate 'process == "hpc-enforcerd"' --info | grep -i shadow
+sudo agent/scripts/watch.sh | grep -i shadow
 ```
 
 ⚠️ **The Mac is NOT enforcing bedtime during the soak.** That is the point,

@@ -106,6 +106,12 @@ export async function handleEvents(c: Context): Promise<Response> {
   const rows: (typeof events.$inferInsert)[] = [];
   let unknownEventType = 0;
   let badEventIdFormat = 0;
+  // ⚠️ EVERY rejection reason, not just the two §4.4 and X5 name. The first
+  // real run rejected 39 of 83 events and this line said `unknown_event_type:
+  // 0, bad_event_id_format: 0` — true, and no help at all. For `schema`, the
+  // top-level field names that failed: bounded by the envelope, never data.
+  const rejectedByReason: Record<string, number> = {};
+  const schemaFields = new Set<string>();
   // ⚠️ §7.5's A4 alert ("crash loop") is specified against the AGENT's log
   // stream — and the agent is a daemon on a Mac whose logs never reach Loki.
   // Nothing ships them and nothing should: that would be a second telemetry
@@ -117,8 +123,10 @@ export async function handleEvents(c: Context): Promise<Response> {
   for (const raw of batch.events) {
     const parsed = eventEnvelope.safeParse(raw);
     if (!parsed.success) {
-      const { id, reason } = classifyRejection(raw, parsed.error);
+      const { id, reason, fields } = classifyRejection(raw, parsed.error);
       if (reason === "bad_event_id_format") badEventIdFormat++;
+      rejectedByReason[reason] = (rejectedByReason[reason] ?? 0) + 1;
+      if (reason === "schema") for (const field of fields) schemaFields.add(field);
       // ⚠️ Always `retryable: false`. A per-event rejection means permanently
       // unacceptable; anything transient fails the whole request instead,
       // which maps to `backoff` and leaves the batch queued. That invariant is
@@ -174,6 +182,8 @@ export async function handleEvents(c: Context): Promise<Response> {
       inserted,
       duplicates: accepted.length - inserted,
       rejected: rejected.length,
+      rejected_by_reason: rejectedByReason,
+      schema_fields: [...schemaFields].sort(),
       // The two "counters" §4.4 and X5 name. There is no Prometheus anywhere
       // in this cluster (C2), so they live on the log line Alloy already ships.
       unknown_event_type: unknownEventType,
@@ -210,17 +220,21 @@ export async function handleEvents(c: Context): Promise<Response> {
  * commonest rejection is that the id itself is malformed — and the agent still
  * has to know which queued event to drop.
  */
-function classifyRejection(raw: unknown, error: z.ZodError): { id: string; reason: string } {
+function classifyRejection(
+  raw: unknown,
+  error: z.ZodError,
+): { id: string; reason: string; fields: string[] } {
   const candidate = (raw as { event_id?: unknown } | null)?.event_id;
   const id = typeof candidate === "string" ? candidate : "";
 
   const paths = new Set(error.issues.map((issue) => String(issue.path[0] ?? "")));
+  const fields = [...paths];
   // X5 — "the server rejects rather than normalises. A normaliser that accepts
   // both spellings keeps the two-spelling hazard alive in the codebase."
-  if (paths.has("event_id")) return { id, reason: "bad_event_id_format" };
+  if (paths.has("event_id")) return { id, reason: "bad_event_id_format", fields };
   // Unlike `type`, an unknown `class` has no retention policy — sample is 90
   // days, audit is 400, and anything else creates rows the pruner will never
   // touch. Rejecting is the narrow exception to R8's never-reject.
-  if (paths.has("class")) return { id, reason: "bad_event_class" };
-  return { id, reason: "schema" };
+  if (paths.has("class")) return { id, reason: "bad_event_class", fields };
+  return { id, reason: "schema", fields };
 }

@@ -212,7 +212,10 @@ async function recomputeBucket(bucket: Bucket): Promise<{
         lt(events.ts, nextHour),
       ),
     )
-    .orderBy(asc(events.bootId), asc(events.seq));
+    // `ts` breaks ties: events outside the enforcer's sequence all carry
+    // `seq = -1` (ADR 0010), and without it their order is whatever the heap
+    // returns. Advisory, but the only order those events have.
+    .orderBy(asc(events.bootId), asc(events.seq), asc(events.ts));
 
   const base = {
     householdId: device.householdId,
