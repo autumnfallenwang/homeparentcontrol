@@ -117,7 +117,7 @@ enum Enforcer {
                 switch effect {
                 case .lock: return "lock"
                 case .shutdown: return "shutdown"
-                case .deliverWarning(let lead, _, _): return "warn_\(lead)"
+                case .deliverWarning(let lead, _, _, _): return "warn_\(lead)"
                 case .audit: return nil
                 }
             }
@@ -141,17 +141,17 @@ enum Enforcer {
 
         for effect in step.effects {
             switch effect {
-            case .deliverWarning(let lead, let channel, _):
+            case .deliverWarning(let lead, let left, let channel, _):
                 let outcome = Effects.warn(
-                    leadMinutes: lead, channel: channel,
+                    leadMinutes: lead, minutesLeft: left, channel: channel,
                     displayName: loaded.document.subject.displayName)
                 // Folded into the NEXT tick's state, so a slow notifier never
                 // delays this tick's lock.
                 pendingWarning = (lead, outcome)
                 Spool.append(
                     kind: "enforcement.warning_shown",
-                    detail: ["lead_minutes": String(lead), "channel": channel,
-                             "outcome": String(describing: outcome)],
+                    detail: ["lead_minutes": String(lead), "minutes_left": String(left),
+                             "channel": channel, "outcome": String(describing: outcome)],
                     tickSeq: tickSeq)
 
             case .lock:

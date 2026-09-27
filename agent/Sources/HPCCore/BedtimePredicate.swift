@@ -92,8 +92,10 @@ public enum BedtimePredicate {
                 for warning in window.warnings {
                     let at = relaxed.from.addingTimeInterval(-Double(warning.leadMinutes) * 60)
                     if at > now { boundaries.append(at) }
-                    // Due within this tick's 60-second window, and not past
-                    // the boundary itself.
+                    // Due from its moment until the boundary — NOT only within
+                    // this tick's 60 s (an earlier comment said so; the code
+                    // never did). A late start therefore finds several due at
+                    // once, and the ladder delivers only the most urgent.
                     if now >= at && now < relaxed.from {
                         due.append(
                             DueWarning(

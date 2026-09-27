@@ -69,14 +69,17 @@ public enum Effects {
     /// Both surfaces are observed working on this build, including from a root
     /// daemon. Returns the outcome the ladder needs — and the three cases stay
     /// distinct all the way up.
-    public static func warn(leadMinutes: Int, channel: String, displayName: String)
-        -> Ladder.WarningOutcome
-    {
+    /// ⚠️ Worded from `minutesLeft`, the real time to the boundary — never
+    /// the configured lead, which on a late start said "30 minutes" with two
+    /// left.
+    public static func warn(
+        leadMinutes: Int, minutesLeft: Int, channel: String, displayName: String
+    ) -> Ladder.WarningOutcome {
         guard let uid = consoleUser() else { return .noConsoleUser }
 
-        let message = leadMinutes == 1
+        let message = minutesLeft <= 1
             ? "Bedtime in 1 minute. Save your work now."
-            : "Bedtime in \(leadMinutes) minutes."
+            : "Bedtime in \(minutesLeft) minutes."
 
         let status: Int32
         if channel == "banner" {

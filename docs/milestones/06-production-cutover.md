@@ -149,6 +149,13 @@ requiring the paid Apple Developer Program.
   is refuted, as is a second one (`Process.isRunning` does clear off-runloop — measured). What
   remains is the fixed 60 s/20 s timing. Still `awaiting-verification`: a delivered warning and the
   escalation to shutdown have not been seen yet.
+- 2026-09-27: **Second observed lock, through the real UI** (rules page, child picker, Publish).
+  Confirmed on hardware: warnings **delivered**; re-lock every minute with no gap (8/8); one record
+  per lock; **the deadfall ran on the right day** (`source: deadfall` at both Sunday entries,
+  deferring to the live enforcer). New defect, fixed: a countdown that starts late delivered every
+  past-due warning at once, each worded with its configured lead — "Bedtime in 30 minutes" with two
+  left. Now one warning, the most urgent, worded with the real time left. Shutdown did not fire;
+  pending a read of the published window's action.
 
 ## ⛔ What is left
 

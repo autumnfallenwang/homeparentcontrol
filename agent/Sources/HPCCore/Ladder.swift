@@ -23,7 +23,9 @@ public enum Ladder {
     /// What the enforcer should do about this tick. The caller performs these;
     /// the ladder never touches the machine itself.
     public enum Effect: Equatable, Sendable {
-        case deliverWarning(leadMinutes: Int, channel: String, windowId: String)
+        /// `leadMinutes` identifies WHICH warning (for dedup and the X10 gate);
+        /// `minutesLeft` is what the child is told.
+        case deliverWarning(leadMinutes: Int, minutesLeft: Int, channel: String, windowId: String)
         /// Assert the screen lock. Idempotent — if it is already locked this
         /// is a no-op, which is why re-locking every tick is safe.
         case lock
@@ -154,19 +156,36 @@ public enum Ladder {
             }
 
             // Warnings fire BEFORE the window opens, so they belong here.
-            for warning in evaluation.dueWarnings {
+            //
+            // ⚠️ ONE warning — the most urgent — worded with the time actually
+            // left. Every warning whose moment has passed is "due" until the
+            // boundary, so a countdown that starts late (a Mac woken from sleep
+            // at 21:25, a rule published close to bedtime, an agent restarted
+            // mid-countdown) used to deliver all of them in one tick, each with
+            // its CONFIGURED lead: "Bedtime in 30 minutes" with two left.
+            // Found on the second observed lock (2026-09-27). The stale ones
+            // are marked attempted, so they never fire later either.
+            if let urgent = evaluation.dueWarnings.min(by: {
+                ($0.boundaryAt, $0.leadMinutes) < ($1.boundaryAt, $1.leadMinutes)
+            }) {
                 // A different boundary is a different night: start clean.
-                if state.warningsAttemptedFor != warning.boundaryAt {
-                    state.warningsAttemptedFor = warning.boundaryAt
+                if state.warningsAttemptedFor != urgent.boundaryAt {
+                    state.warningsAttemptedFor = urgent.boundaryAt
                     state.warningsAttempted = []
                 }
-                if state.warningsAttempted.contains(warning.leadMinutes) { continue }
-                state.warningsAttempted.insert(warning.leadMinutes)
-                effects.append(
-                    .deliverWarning(
-                        leadMinutes: warning.leadMinutes,
-                        channel: warning.channel,
-                        windowId: warning.windowId))
+                let fresh = !state.warningsAttempted.contains(urgent.leadMinutes)
+                for warning in evaluation.dueWarnings where warning.boundaryAt == urgent.boundaryAt {
+                    state.warningsAttempted.insert(warning.leadMinutes)
+                }
+                if fresh {
+                    let secondsLeft = urgent.boundaryAt.timeIntervalSince(now)
+                    effects.append(
+                        .deliverWarning(
+                            leadMinutes: urgent.leadMinutes,
+                            minutesLeft: max(1, Int((secondsLeft / 60).rounded(.up))),
+                            channel: urgent.channel,
+                            windowId: urgent.windowId))
+                }
             }
             return Decision(effects: effects, state: state)
         }

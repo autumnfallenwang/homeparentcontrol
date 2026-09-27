@@ -308,6 +308,61 @@ struct LadderTests {
         #expect(!second.effects.contains { if case .deliverWarning = $0 { return true } else { return false } })
     }
 
+    static func warnings(_ d: Ladder.Decision) -> [(lead: Int, left: Int)] {
+        d.effects.compactMap {
+            if case .deliverWarning(let lead, let left, _, _) = $0 { return (lead, left) }
+            return nil
+        }
+    }
+
+    /// ★ The second observed lock: the window was published ~5 minutes before
+    /// it opened, and one tick delivered the 5-, 15- AND 30-minute warnings —
+    /// a banner saying "Bedtime in 30 minutes" with two minutes left.
+    @Test("★ a late start delivers ONE warning, worded with the time actually left")
+    func lateStartOneHonestWarning() {
+        let boundary = Self.t0.addingTimeInterval(110)  // 1 m 50 s away
+        let due = [5, 15, 30].map { Self.dueWarning(lead: $0, at: boundary) }
+        let d = Ladder.step(
+            evaluation: Self.evaluation(restricted: false, warnings: due),
+            state: Ladder.State(), now: Self.t0)
+        let sent = Self.warnings(d)
+        #expect(sent.count == 1)
+        #expect(sent.first?.lead == 5, "the most urgent, not the first configured")
+        #expect(sent.first?.left == 2, "the real time left, not the lead")
+    }
+
+    @Test("the warnings a late start skipped never fire afterwards")
+    func supersededStaySilent() {
+        let boundary = Self.t0.addingTimeInterval(110)
+        let due = [5, 15, 30].map { Self.dueWarning(lead: $0, at: boundary) }
+        let first = Ladder.step(
+            evaluation: Self.evaluation(restricted: false, warnings: due),
+            state: Ladder.State(), now: Self.t0)
+        let second = Ladder.step(
+            evaluation: Self.evaluation(restricted: false, warnings: due),
+            state: first.state, now: Self.t0.addingTimeInterval(30))
+        #expect(Self.warnings(second).isEmpty)
+    }
+
+    @Test("an on-time countdown still delivers every warning, once each")
+    func onTimeCountdown() {
+        let boundary = Self.t0.addingTimeInterval(1800)
+        var state = Ladder.State()
+        var sent: [Int] = []
+        for minutesBefore in [30, 15, 5, 1] {
+            let now = boundary.addingTimeInterval(-Double(minutesBefore) * 60)
+            let due = [30, 15, 5, 1].filter { $0 >= minutesBefore }
+                .map { Self.dueWarning(lead: $0, at: boundary) }
+            let d = Ladder.step(
+                evaluation: Self.evaluation(restricted: false, warnings: due),
+                state: state, now: now)
+            sent += Self.warnings(d).map(\.lead)
+            #expect(Self.warnings(d).first?.left == minutesBefore)
+            state = d.state
+        }
+        #expect(sent == [30, 15, 5, 1])
+    }
+
     /// ⚠️ Keyed by lead minutes alone, "already warned at T-30" would survive
     /// into the following night and suppress it — a bedtime arriving with no
     /// notice at all.
