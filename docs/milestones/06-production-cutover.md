@@ -129,6 +129,12 @@ requiring the paid Apple Developer Program.
   `smoke-test.md` rewritten around what the run taught: one-command install with `--base-url` and
   `--code`, `agent/scripts/watch.sh` instead of `log stream`, and a `Lock, then shut down` window so
   the DEV line can actually appear. Still `awaiting-verification`: the lock itself has not been seen.
+- 2026-09-26: **Reinstalling over the running agent left the enforcer and sync unloaded** — the
+  pkg's `postinstall` bootstrapped straight after `bootout`, into the window before the old process
+  exits, and `|| true` hid the EIO. The first install passed only because nothing was loaded yet.
+  Every supervisor-driven upgrade takes this path, so **an automatic update would have stopped
+  enforcement**. Fixed (wait, retry, fail loudly) and verified on hardware by installing twice in a
+  row: all four daemons loaded, device HEALTHY.
 
 ## ⛔ What is left
 

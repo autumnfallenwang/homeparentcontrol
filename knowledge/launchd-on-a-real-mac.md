@@ -22,6 +22,10 @@ launchd. Each one cost a round trip, and none is visible to a test that calls th
 4. **`launchctl bootout` returns before the process has exited.** Bootstrapping straight after gives
    `Bootstrap failed: 5: Input/output error`. Poll `launchctl print system/<label>` until it fails,
    then bootstrap. `kickstart -k` restarts the process but does **not** re-read the plist.
+   ⚠️ **The pkg's own `postinstall` had this race** behind `|| true`: a first install worked
+   (nothing loaded), and every reinstall — including every supervisor-driven upgrade — left the
+   enforcer and sync unloaded, silently. Caught 2026-09-26 by installing twice in a row, which is
+   the only way to exercise the upgrade path on purpose.
 5. **`pmset displaysleepnow` only locks if the user's screen-lock delay is `immediate`.** Check with
    `sysadminctl -screenLock status` as that user; it was `14400 seconds` on this Mac, at which a
    mouse wiggle brings the desktop straight back. Setting it needs `-password -` (a bare

@@ -123,10 +123,34 @@ mkdir -p /var/log/homeparentcontrol
 chown -R root:wheel /var/db/homeparentcontrol
 chmod 700 /var/db/homeparentcontrol
 
-for job in enforcerd sync; do
+# ⚠️ WAIT between bootout and bootstrap. `bootout` returns before the old
+# process has exited, and bootstrapping into that window fails with
+# "Bootstrap failed: 5: Input/output error". This used to be two lines with
+# `|| true` on each: on a FIRST install nothing was loaded, so it worked; on
+# every REINSTALL — including every supervisor-driven upgrade — it left the
+# enforcer and sync unloaded, silently. An upgrade that stops enforcement.
+# Found on the second on-hardware install, 2026-09-26.
+reload() {
+  job="$1"
   launchctl bootout "system/com.hpc.$job" 2>/dev/null || true
-  launchctl bootstrap system "/Library/LaunchDaemons/com.hpc.$job.plist" || true
-done
+  i=0
+  while launchctl print "system/com.hpc.$job" >/dev/null 2>&1 && [ "$i" -lt 30 ]; do
+    sleep 1; i=$((i + 1))
+  done
+  i=0
+  until launchctl bootstrap system "/Library/LaunchDaemons/com.hpc.$job.plist" 2>/dev/null; do
+    i=$((i + 1))
+    if [ "$i" -ge 15 ]; then
+      echo "postinstall: could not load com.hpc.$job" >&2
+      return 1
+    fi
+    sleep 1
+  done
+}
+# Loud, not `|| true`: an installer that reports success while the enforcer
+# is not loaded is the one outcome worse than a failed install.
+FAILED=0
+for job in enforcerd sync; do reload "$job" || FAILED=1; done
 # ⚠️ com.hpc.supervisor is NOT restarted here. A.24: the updater does not
 # update itself, and restarting it mid-install is how it would.
 #
@@ -138,7 +162,7 @@ done
 # never a restart. ADR 0010.
 launchctl print system/com.hpc.supervisor >/dev/null 2>&1 \
   || launchctl bootstrap system /Library/LaunchDaemons/com.hpc.supervisor.plist || true
-exit 0
+exit "$FAILED"
 POST
 chmod 755 "$OUT/scripts/postinstall"
 
