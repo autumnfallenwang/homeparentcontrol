@@ -154,8 +154,17 @@ requiring the paid Apple Developer Program.
   per lock; **the deadfall ran on the right day** (`source: deadfall` at both Sunday entries,
   deferring to the live enforcer). New defect, fixed: a countdown that starts late delivered every
   past-due warning at once, each worded with its configured lead — "Bedtime in 30 minutes" with two
-  left. Now one warning, the most urgent, worded with the real time left. Shutdown did not fire;
-  pending a read of the published window's action.
+  left. Now one warning, the most urgent, worded with the real time left. Shutdown did not fire:
+  the published window's action was `lock` (the dropdown's default) — read from the Mac's policy.
+- 2026-09-27: ★ **THE FULL LADDER, OBSERVED** (safe build, `Lock, then shut down`, 10-minute window,
+  published from the rules page). 02:55:48 warning "2 minutes" (delivered) → 02:56:48 warning "1
+  minute" (delivered) → 02:57:32 lock → re-lock every minute → **03:02:32, exactly 300 s after the
+  lock: `DEV_ENFORCEMENT: shutdown suppressed` and `action_taken {action: shutdown}`** → fired once,
+  back to re-locking → 03:07:32 released. The deadfall ran at both entries and deferred. Every rung
+  but the real power-off is now observed; that one stays deliberately manual (cutover.md §3, on the
+  mini, production build). One run was spent learning that a window no longer than the grace can
+  never escalate — the ladder shuts down only if bedtime still holds when the grace runs out, so
+  `smoke-test.md` step 5's 8-minute window is the minimum, not a suggestion.
 
 ## ⛔ What is left
 

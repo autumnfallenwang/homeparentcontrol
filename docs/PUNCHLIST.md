@@ -259,8 +259,9 @@ toward collecting, with tests.
 
 ## If you do only three things
 
-1. **Finish the smoke test through the real UI** — publish from `/rules`, and confirm the warning
-   is delivered and the ladder reaches the `DEV_ENFORCEMENT` line.
+1. **Finish the smoke test** — ✅ the whole ladder is observed (warning → lock → re-lock → the
+   `DEV_ENFORCEMENT` line → release, 2026-09-27). Left: step 7 (a grant from the phone,
+   `Sent ✓ → Applied ✓`) and step 8 (reports).
 2. **Decide the screen-lock delay** — until then a bedtime "lock" may be a
    black screen, and the dashboard cannot tell you.
 3. **Back up `POLICY_SIGNING_KEY`** — sixty seconds, and losing it means
