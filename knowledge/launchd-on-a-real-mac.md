@@ -42,11 +42,13 @@ launchd. Each one cost a round trip, and none is visible to a test that calls th
    1 = Sunday … 7 = Saturday.** Passing one straight into the other moves every entry a day late —
    the deadfall did exactly that, and its test pinned the wrong numbers. Confirmed on hardware: a
    Saturday entry written as `7` did not run on Saturday (`launchctl print` → `runs = 0`).
-9. **A command that works from `sudo` in Terminal may not work from a LaunchDaemon.** Terminal is in
-   the user's GUI (audit) session; a daemon is not, and `launchctl asuser` only swaps the bootstrap
-   namespace. The enforcer's `osascript` dialog showed from Terminal and never from the daemon.
-   Verify GUI-touching behaviour from a real temporary LaunchDaemon
-   (`tools/verify/warning-from-daemon.sh`), never from a shell.
+9. **`launchctl asuser <uid> osascript` DOES reach the screen from a root LaunchDaemon** — dialog
+   and banner, as root or via `sudo -u`. Measured 2026-09-27 with `tools/verify/warning-from-daemon.sh`,
+   which runs from a real temporary LaunchDaemon (a Terminal test cannot answer it: Terminal is
+   already in the GUI session). ⚠️ A same-day guess that daemons *could not* show dialogs was
+   written here and was wrong; the observed failure was an unclicked dialog killed by its 20 s
+   runner while it waited 60 s for a click. Measure before recording a macOS limit
+   ([[verify-macos-claims]]).
 
 **How to apply:** before writing an on-Mac procedure, check each command against this list; and
 when a command "succeeds" silently on a Mac, confirm the effect rather than the exit status.

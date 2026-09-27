@@ -162,14 +162,16 @@ Still to do:
 
 ## 🖥️ One command on the Mac, then a decision
 
-- [ ] ⛔ **Warnings do not reach the screen from the daemon.** On the first observed lock the
-      one-minute modal never appeared — `osascript` ran until killed — while the identical command
-      from Terminal showed it at once: a LaunchDaemon is not in the user's GUI session, and
-      `launchctl asuser` changes only the bootstrap namespace. **It gates more than a dialog:** X10
-      forbids escalating to shutdown without a delivered warning, so if nothing can be delivered,
-      *"Lock, then shut down" never shuts down* on a real Mac. Run
-      `sudo tools/verify/warning-from-daemon.sh`, watch the screen, and note which of A–D appear —
-      that decides the fix. (The modal's own 60 s-vs-20 s timing bug is already fixed.)
+- [ ] **Confirm the warning is delivered, and the ladder escalates.** On the first observed lock
+      the modal was recorded `failed`. ✅ **Not the daemon context** — measured 2026-09-27: from a
+      real LaunchDaemon the enforcer's exact command showed the dialog and the banner
+      (`tools/verify/warning-from-daemon.sh`, all four variants seen). The explanation that fits is
+      the fixed timing bug: a 60 s dialog under a 20 s runner, so an unclicked dialog was killed and
+      counted as failed. **It matters beyond the dialog:** X10 forbids escalating to shutdown
+      without a delivered warning. Re-run the smoke test's window with the rebuilt agent and check
+      `warning_shown {outcome: delivered}` and, 5 minutes after the lock, the `DEV_ENFORCEMENT`
+      line. If the dialog is recorded delivered but nobody saw it, it is appearing behind windows —
+      a separate problem.
 
 ## 🤔 Decisions — nobody can do these for you
 

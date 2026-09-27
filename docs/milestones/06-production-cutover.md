@@ -143,10 +143,12 @@ requiring the paid Apple Developer Program.
   **the deadfall fired a day late** (`Calendar` weekday written as launchd's; confirmed on the Mac —
   `runs = 0` at its Saturday entry, which launchd read as Sunday); **every lock recorded twice**;
   **the rules page could only edit the first child's rules** (the night's first publish answered
-  `unchanged`). Plus the modal's 60 s give-up against its 20 s runner. **Open:** the warning never
-  appeared from the daemon although the same command from Terminal did —
-  `tools/verify/warning-from-daemon.sh` decides it. Still `awaiting-verification`: escalation to
-  shutdown has not been seen, and cannot be until a warning is delivered.
+  `unchanged`). Plus the modal's 60 s give-up against its 20 s runner.
+- 2026-09-27: `tools/verify/warning-from-daemon.sh` — **all four variants appeared** from a real
+  LaunchDaemon (the enforcer's exact modal: clicked, `exit 0` after 6 s). The daemon-context theory
+  is refuted, as is a second one (`Process.isRunning` does clear off-runloop — measured). What
+  remains is the fixed 60 s/20 s timing. Still `awaiting-verification`: a delivered warning and the
+  escalation to shutdown have not been seen yet.
 
 ## ⛔ What is left
 
