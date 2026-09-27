@@ -24,7 +24,7 @@ import {
   restoreVersion,
   saveRules,
 } from "../../lib/parent-api.js";
-import { publishTargets } from "../../lib/publish-target.js";
+import { defaultChild, publishTargets } from "../../lib/publish-target.js";
 
 /**
  * `/rules` — draft → diff → publish, plus `/rules/history` inline.
@@ -40,6 +40,7 @@ export default function RulesPage() {
   const [windows, setWindows] = useState<RuleWindow[]>([]);
   const [setId, setSetId] = useState<string | null>(null);
   const [childId, setChildId] = useState<string | null>(null);
+  const [childPicked, setChildPicked] = useState(false);
   const [devices, setDevices] = useState<DeviceSummary[] | null>(null);
   const [deviceId, setDeviceId] = useState<string>("");
   const [diff, setDiff] = useState<Awaited<ReturnType<typeof getRulesDiff>> | null>(null);
@@ -51,14 +52,7 @@ export default function RulesPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const payload = await getRules();
-        setRules(payload);
-        const first = payload.policy_sets[0];
-        if (first) {
-          setSetId(first.id);
-          setChildId(first.child_id);
-          setWindows(first.windows);
-        }
+        setRules(await getRules());
       } catch (caught) {
         setError(caught);
       }
@@ -83,6 +77,22 @@ export default function RulesPage() {
     })();
   }, []);
 
+  // ⚠️ WHOSE rules. This used to be `policy_sets[0]` with no way to choose:
+  // with two children the edit could land in the wrong child's set, and the
+  // publish to the right Mac answered `unchanged`. Until the parent picks,
+  // follow `defaultChild` — the first child whose rules can reach a Mac.
+  useEffect(() => {
+    if (!rules || childPicked) return;
+    setChildId(defaultChild(rules, devices ?? []));
+  }, [rules, devices, childPicked]);
+
+  useEffect(() => {
+    const set = rules?.policy_sets.find((candidate) => candidate.child_id === childId);
+    setSetId(set?.id ?? null);
+    setWindows(set?.windows ?? []);
+    setSaved(false);
+  }, [rules, childId]);
+
   const targets = useMemo(() => publishTargets(devices ?? [], childId), [devices, childId]);
 
   // Keep the parent's pick while it is still valid; otherwise the best target.
@@ -93,7 +103,13 @@ export default function RulesPage() {
   }, [targets]);
 
   const loadDiff = useCallback(async () => {
-    if (!deviceId) return;
+    // Clear, not keep: the last child's diff — and its Publish button — must
+    // not stay on screen once there is no Mac to publish to.
+    if (!deviceId) {
+      setDiff(null);
+      setHistory(null);
+      return;
+    }
     setBusy(true);
     try {
       setDiff(await getRulesDiff(deviceId));
@@ -128,6 +144,25 @@ export default function RulesPage() {
       ) : null}
 
       <div className="space-y-4">
+        {rules.children.length > 1 ? (
+          <Field label="Rules for">
+            <select
+              className={inputClass}
+              value={childId ?? ""}
+              onChange={(event) => {
+                setChildPicked(true);
+                setChildId(event.target.value);
+              }}
+            >
+              {rules.children.map((child) => (
+                <option key={child.id} value={child.id}>
+                  {child.displayName}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : null}
+
         <Card>
           <h2 className="font-medium text-slate-900">Bedtime windows</h2>
           <div className="mt-4 space-y-4">

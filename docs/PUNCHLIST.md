@@ -160,6 +160,17 @@ Still to do:
 
 ---
 
+## 🖥️ One command on the Mac, then a decision
+
+- [ ] ⛔ **Warnings do not reach the screen from the daemon.** On the first observed lock the
+      one-minute modal never appeared — `osascript` ran until killed — while the identical command
+      from Terminal showed it at once: a LaunchDaemon is not in the user's GUI session, and
+      `launchctl asuser` changes only the bootstrap namespace. **It gates more than a dialog:** X10
+      forbids escalating to shutdown without a delivered warning, so if nothing can be delivered,
+      *"Lock, then shut down" never shuts down* on a real Mac. Run
+      `sudo tools/verify/warning-from-daemon.sh`, watch the screen, and note which of A–D appear —
+      that decides the fix. (The modal's own 60 s-vs-20 s timing bug is already fixed.)
+
 ## 🤔 Decisions — nobody can do these for you
 
 - [ ] ⛔ **The screen-lock delay makes the lock a no-op, and she can set it

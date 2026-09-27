@@ -135,6 +135,18 @@ requiring the paid Apple Developer Program.
   Every supervisor-driven upgrade takes this path, so **an automatic update would have stopped
   enforcement**. Fixed (wait, retry, fail loudly) and verified on hardware by installing twice in a
   row: all four daemons loaded, device HEALTHY.
+- 2026-09-26: ★ **THE LOCK, OBSERVED.** Parent's MacBook Air, safe build, policy published to the
+  cluster: locked at the boundary (21:37:47), re-locked, released at the window's end
+  (`episode_ended` 21:45:47), then `none` for three hours. The contract's central claim, seen for
+  the first time. Four defects surfaced and are fixed with falsified tests: **re-lock skipped 3 of
+  8 ticks** (60 s throttle against a jittery 60 s timer — the test reproduces 3/8 exactly);
+  **the deadfall fired a day late** (`Calendar` weekday written as launchd's; confirmed on the Mac —
+  `runs = 0` at its Saturday entry, which launchd read as Sunday); **every lock recorded twice**;
+  **the rules page could only edit the first child's rules** (the night's first publish answered
+  `unchanged`). Plus the modal's 60 s give-up against its 20 s runner. **Open:** the warning never
+  appeared from the daemon although the same command from Terminal did —
+  `tools/verify/warning-from-daemon.sh` decides it. Still `awaiting-verification`: escalation to
+  shutdown has not been seen, and cannot be until a warning is delivered.
 
 ## ⛔ What is left
 

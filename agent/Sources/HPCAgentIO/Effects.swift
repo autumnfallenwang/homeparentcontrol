@@ -26,8 +26,23 @@ public enum Effects {
     /// ⚖️ Fire-and-forget through `launchctl asuser`, rather than a
     /// long-lived LaunchAgent: **a LaunchAgent runs as the child and is
     /// unloadable by her; the root daemon is not.**
+    /// How long any `asUser` command may run before it is killed and counted
+    /// as failed. Bounds how long a warning can hold up a tick.
+    public static let asUserTimeoutS: TimeInterval = 20
+
+    /// How long the modal stays up waiting for "OK". ⚠️ MUST be shorter than
+    /// `asUserTimeoutS` — that ordering is what makes the outcome honest. A
+    /// dialog that gives up on its own exits 0, so it was on screen; one that
+    /// is still running at the timeout never got there, and is killed. It
+    /// used to be 60 s against a 20 s timeout: a dialog nobody clicked was
+    /// torn down at 20 s and recorded as FAILED even when it had appeared.
+    /// Found on the first on-hardware run. `EffectsTests` pins the ordering.
+    public static let modalGiveUpS = 15
+
     @discardableResult
-    public static func asUser(_ uid: uid_t, _ argv: [String], timeout: TimeInterval = 20) -> Int32 {
+    public static func asUser(
+        _ uid: uid_t, _ argv: [String], timeout: TimeInterval = asUserTimeoutS
+    ) -> Int32 {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         task.arguments = ["asuser", String(uid)] + argv
@@ -74,7 +89,8 @@ public enum Effects {
             status = asUser(uid, [
                 "/usr/bin/osascript", "-e",
                 "display dialog \(quoted(message)) with title \(quoted("Bedtime")) "
-                    + "buttons {\"OK\"} default button 1 giving up after 60 with icon caution",
+                    + "buttons {\"OK\"} default button 1 giving up after \(modalGiveUpS) "
+                    + "with icon caution",
             ])
         }
 

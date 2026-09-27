@@ -1,6 +1,6 @@
 ---
 name: launchd-on-a-real-mac
-description: Seven macOS/launchd facts the first on-hardware run hit — setenv, systemsetup, bootstrap EIO, payload plists, screen lock, os_log
+description: Nine macOS/launchd facts the first on-hardware runs hit — setenv, bootstrap EIO, payload plists, screen lock, os_log, Weekday numbering, daemon vs Terminal GUI access
 metadata:
   type: reference
 ---
@@ -37,6 +37,16 @@ launchd. Each one cost a round trip, and none is visible to a test that calls th
 7. **Before enrolment the daemon has no other voice.** Nothing reaches the control plane without a
    credential, so every pre-enrolment state must land in `sync.health` and stderr — a missing
    `sync.health` is also what the supervisor reads as a dead sync daemon.
+
+8. **launchd's `Weekday` is 1 = Monday … 7 (or 0) = Sunday; Foundation's `Calendar.weekday` is
+   1 = Sunday … 7 = Saturday.** Passing one straight into the other moves every entry a day late —
+   the deadfall did exactly that, and its test pinned the wrong numbers. Confirmed on hardware: a
+   Saturday entry written as `7` did not run on Saturday (`launchctl print` → `runs = 0`).
+9. **A command that works from `sudo` in Terminal may not work from a LaunchDaemon.** Terminal is in
+   the user's GUI (audit) session; a daemon is not, and `launchctl asuser` only swaps the bootstrap
+   namespace. The enforcer's `osascript` dialog showed from Terminal and never from the daemon.
+   Verify GUI-touching behaviour from a real temporary LaunchDaemon
+   (`tools/verify/warning-from-daemon.sh`), never from a shell.
 
 **How to apply:** before writing an on-Mac procedure, check each command against this list; and
 when a command "succeeds" silently on a Mac, confirm the effect rather than the exit status.

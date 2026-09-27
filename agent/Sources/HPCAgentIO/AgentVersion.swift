@@ -1,7 +1,7 @@
 import Foundation
 
 /// The one version every daemon reports — in `enforcer.health`, in every
-/// sync's `agent_version`, and so on the parent's device card.
+/// sync's `agent_version`, and so as Agent on the parent's device page.
 ///
 /// ⚠️ **The `-dev` suffix is derived from `DEV_ENFORCEMENT` itself**, the same
 /// compile-time flag that turns `Effects.shutdown()` into a log line. So a

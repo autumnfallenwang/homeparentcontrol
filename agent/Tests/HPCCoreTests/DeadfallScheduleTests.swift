@@ -33,8 +33,26 @@ struct DeadfallScheduleTests {
         let policy = PredicateTests.schoolNights(days: ["sun", "mon", "tue", "wed", "thu"])
         let weekdays = Set(
             Self.entries(policy).filter { $0.hour == 21 && $0.minute == 30 }.map(\.weekday))
-        // Calendar weekdays: 1 = Sunday … 5 = Thursday.
-        #expect(weekdays == [1, 2, 3, 4, 5])
+        // launchd weekdays: 7 = Sunday, 1 = Monday … 4 = Thursday. (This test
+        // used to expect Calendar's [1, 2, 3, 4, 5] — which launchd reads as
+        // Monday–Friday. It pinned the bug instead of catching it.)
+        #expect(weekdays == [7, 1, 2, 3, 4])
+    }
+
+    /// ★ The exact entry the first on-hardware run wrote: Saturday 21:37 as
+    /// `Weekday 7`. launchd reads 7 as Sunday, and did not fire that night.
+    @Test("★ a Saturday boundary is launchd 6, never 7 — 7 is Sunday")
+    func saturdayIsSix() {
+        let policy = PredicateTests.schoolNights(days: ["sat"])
+        let nights = Set(Self.entries(policy).filter { $0.hour == 21 }.map(\.weekday))
+        #expect(nights == [6])
+    }
+
+    @Test("every Calendar weekday maps to launchd's, per `man launchd.plist`")
+    func mappingTable() {
+        // Calendar: 1 Sun, 2 Mon … 7 Sat.  launchd: 7 (or 0) Sun, 1 Mon … 6 Sat.
+        let mapped = (1...7).map { DeadfallSchedule.launchdWeekday(calendar: $0) }
+        #expect(mapped == [7, 1, 2, 3, 4, 5, 6])
     }
 
     @Test("no windows means no wake-ups at all")
@@ -80,8 +98,8 @@ struct DeadfallScheduleTests {
         let policy = PredicateTests.schoolNights(days: ["mon"])
         let tokyo = TimeZone(identifier: "Asia/Tokyo")!
         let result = Self.entries(policy, zone: tokyo)
-        // Monday 21:30 New York is Tuesday 10:30 Tokyo.
-        #expect(result.contains { $0.weekday == 3 && $0.hour == 10 && $0.minute == 30 })
+        // Monday 21:30 New York is Tuesday 10:30 Tokyo — launchd's 2.
+        #expect(result.contains { $0.weekday == 2 && $0.hour == 10 && $0.minute == 30 })
     }
 
     // MARK: - ★ Scheduling is permissive; deciding is the predicate's job
@@ -138,7 +156,7 @@ struct DeadfallScheduleTests {
         let after = DeadfallSchedule.entries(
             policy: policy, now: PredicateTests.ny("2026-09-21 23:00"), systemZone: Self.ny)
         #expect(after == before)
-        #expect(after.contains { $0.weekday == 2 && $0.hour == 21 && $0.minute == 30 })
+        #expect(after.contains { $0.weekday == 1 && $0.hour == 21 && $0.minute == 30 })  // Monday
     }
 
     // MARK: - The plist

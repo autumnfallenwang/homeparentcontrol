@@ -61,4 +61,4 @@ The skill picks a slug, writes the file with the right frontmatter, and updates 
 | [walk-the-flow-not-the-endpoints](./walk-the-flow-not-the-endpoints.md) | `feedback` | Every component green and the composition unusable — the UI had no sign-in page |
 | [loki-labels-are-not-what-the-spec-says](./loki-labels-are-not-what-the-spec-says.md) | `reference` | Only `namespace`/`pod`/`container`/`node` exist — and `or vector(0)` hides a wrong selector for ever |
 | [strings-cannot-prove-swift-absence](./strings-cannot-prove-swift-absence.md) | `reference` | Swift packs literals ≤15 bytes into instruction immediates — use `nm` and `otool -tV` |
-| [launchd-on-a-real-mac](./launchd-on-a-real-mac.md) | `reference` | `setenv` refused by SIP, payload plists reset on upgrade, bootstrap EIO, screen-lock delay, no os_log |
+| [launchd-on-a-real-mac](./launchd-on-a-real-mac.md) | `reference` | `setenv` refused by SIP, payload plists reset on upgrade, bootstrap EIO, screen-lock delay, no os_log, launchd `Weekday` ≠ `Calendar`, daemon ≠ Terminal for GUI |

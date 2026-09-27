@@ -1,4 +1,4 @@
-import type { DeviceSummary } from "./parent-api.js";
+import type { DeviceSummary, RulesPayload } from "./parent-api.js";
 
 /**
  * Which Macs a rules change can be published to, best first.
@@ -29,4 +29,24 @@ export function publishTargets(
         (RANK[a.status] ?? 9) - (RANK[b.status] ?? 9) ||
         (a.label ?? "").localeCompare(b.label ?? ""),
     );
+}
+
+/**
+ * Whose rules the page opens on.
+ *
+ * ⚠️ The page used to edit `policy_sets[0]` — whichever set the server listed
+ * first — with no way to choose. On the first real run the household had two
+ * children; the edit landed in the one whose only Mac never enrolled, and
+ * publishing to the real Mac answered `unchanged`. Default to the first child
+ * whose rules can actually reach a Mac; the page offers the rest in a picker.
+ */
+export function defaultChild(
+  rules: Pick<RulesPayload, "children" | "policy_sets">,
+  devices: readonly DeviceSummary[],
+): string | null {
+  const withRules = rules.children.filter((child) =>
+    rules.policy_sets.some((set) => set.child_id === child.id),
+  );
+  const reachable = withRules.find((child) => publishTargets(devices, child.id).length > 0);
+  return (reachable ?? withRules[0])?.id ?? null;
 }

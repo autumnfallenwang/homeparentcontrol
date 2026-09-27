@@ -21,10 +21,27 @@ import Foundation
 /// reason §3.2 made enforcement a predicate rather than a cron.
 public enum DeadfallSchedule {
 
+    /// `Calendar` (1 = Sunday … 7 = Saturday) → launchd (1 = Monday … 7 = Sunday).
+    ///
+    /// ⚠️ These used to be written straight through, which moved every entry
+    /// ONE DAY LATE: Sunday's became Monday's, Saturday's (7) became Sunday's.
+    /// The comment above said "7 for Sunday" and the code never converted.
+    /// Confirmed on hardware 2026-09-26: a Saturday 21:37 boundary was written
+    /// as `Weekday 7`, and launchd did not run the deadfall at 21:37 —
+    /// `runs = 0`. Because the deadfall re-checks the predicate before
+    /// locking, it never locked a wrong night; it silently skipped the last
+    /// night of every run of nights (a Sun–Thu policy's Thursday fired on
+    /// Friday and found nothing to do). The backstop, absent on the one night
+    /// in five it was built for, with nothing to show for it.
+    static func launchdWeekday(calendar weekday: Int) -> Int {
+        weekday == 1 ? 7 : weekday - 1
+    }
+
     /// One `StartCalendarInterval` entry.
     public struct Entry: Equatable, Sendable, Hashable {
-        /// launchd's `Weekday`: 0 and 7 are both Sunday; we always emit 1–7
-        /// with 7 for Sunday, since `Calendar`'s `weekday` is 1 = Sunday.
+        /// launchd's `Weekday`, 1 = Monday … 7 = Sunday (`man launchd.plist`:
+        /// "0 and 7 are Sunday"). NOT `Calendar`'s numbering, which is
+        /// 1 = Sunday … 7 = Saturday — see `launchdWeekday(calendar:)`.
         public let weekday: Int
         public let hour: Int
         public let minute: Int
@@ -94,7 +111,8 @@ public enum DeadfallSchedule {
             let parts = calendar.dateComponents([.weekday, .hour, .minute], from: instant)
             guard let weekday = parts.weekday, let hour = parts.hour, let minute = parts.minute
             else { continue }
-            let entry = Entry(weekday: weekday, hour: hour, minute: minute)
+            let entry = Entry(
+                weekday: launchdWeekday(calendar: weekday), hour: hour, minute: minute)
             if seen.insert(entry).inserted { result.append(entry) }
         }
         return result

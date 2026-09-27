@@ -120,7 +120,8 @@ If you copied the pkg from another machine: **`tar` or `rsync`, never
 
 **Verify — in the UI, not in a log.** Within about a minute the Mac appears on
 Today; within three ticks its health reads *"checking in normally"*; the
-device card shows **`0.1.0-dev`**.
+device's own page (click its name on Today) shows **Agent `0.1.0-dev`** — the
+Today card does not show a version.
 
 If it does not appear:
 
@@ -149,8 +150,8 @@ budget. A rejected code is now terminal after one attempt.
 end **8 minutes after that**. Make sure **today** is among its days (the
 default is Mon–Thu).
 
-Action: **Lock, then shut down** — *only* once the device card has shown
-`0.1.0-dev`. ⚠️ That is the only action that reaches the last rung: the ladder
+Action: **Lock, then shut down** — *only* once the device page has shown
+Agent `0.1.0-dev`. ⚠️ That is the only action that reaches the last rung: the ladder
 escalates to shutdown only for a `shutdown` window, so with **Lock the
 screen** the `DEV_ENFORCEMENT` line in step 6 can never appear. On the safe
 build the power-off is a log line. If the card does NOT say `-dev`, choose
@@ -253,7 +254,7 @@ sysadminctl -screenLock <old value> -password -
 ```
 
 ⚠️ **Do not leave the `-dev` build installed.** It logs "would shut down"
-for ever and looks completely healthy. The device card shows `0.1.0-dev`,
+for ever and looks completely healthy. The device page shows `0.1.0-dev`,
 which is the tell.
 
 Then decommission the test device in the UI (`/devices/<id>` →
@@ -273,8 +274,8 @@ Decommission, typed confirmation) so it is not left enrolled.
 | Locks but no warnings | warnings need a console user; check you are logged in |
 | `NOT ENFORCING: shadow mode` | a soak marker is present. `sudo rm /var/db/homeparentcontrol/soak.json` — this is V-SHADOW-1 territory |
 | Card says *is NOT enforcing* | either DEGRADED (it cannot read its rules) or shadow mode. Both are honest; read which |
-| Card shows `0.1.0`, not `0.1.0-dev` | you installed the production pkg — it CAN power off. Have `sudo killall shutdown` ready |
+| Device page shows Agent `0.1.0`, not `0.1.0-dev` | you installed the production pkg — it CAN power off. Have `sudo killall shutdown` ready |
 
 ⚠️ **Nothing in this run should ever power the Mac off.** If it does, you
-installed the production pkg — check the device card for a `-dev` suffix,
+installed the production pkg — check the device page for a `-dev` suffix,
 and have `sudo killall shutdown` ready next time.

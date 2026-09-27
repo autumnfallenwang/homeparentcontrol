@@ -95,6 +95,16 @@ public enum Ladder {
     /// — X9: "runaway re-assertion is throttled, not broken."
     public static let reassertInterval: TimeInterval = 60
 
+    /// ⚠️ How much EARLY a tick may land and still re-lock. The enforcer's
+    /// timer is also 60 s, with a second of leeway, so consecutive ticks are
+    /// 59.x or 60.x s apart — and with a bare `>= 60` every tick that followed
+    /// a late one was skipped. Found on the first on-hardware run
+    /// (2026-09-26): inside an 8-minute window, 3 of 8 ticks did not re-lock,
+    /// so the Mac was usable for two minutes at a time instead of one. The
+    /// throttle exists to stop RUNAWAY re-assertion (X9), which is measured in
+    /// seconds, not to skip a tick.
+    public static let reassertTolerance: TimeInterval = 5
+
     /// One tick's worth of decision.
     public static func step(
         evaluation: BedtimePredicate.Evaluation,
@@ -196,11 +206,16 @@ public enum Ladder {
         // absent console user, not the breaker. If a future edit adds an `if`
         // here, that edit is lever #7.
         let shouldReassert =
-            state.lastLockAt.map { now.timeIntervalSince($0) >= reassertInterval } ?? true
+            state.lastLockAt.map {
+                now.timeIntervalSince($0) >= reassertInterval - reassertTolerance
+            } ?? true
+        // ⚠️ `.lock` alone — NOT also an `action_taken` audit. The executor
+        // records the lock's REAL outcome (`action_taken` or `action_failed`);
+        // a second record from here claimed success unconditionally and made
+        // every lock appear twice in the log and the reports. Found on the
+        // first on-hardware run.
         if shouldReassert {
             effects.append(.lock)
-            effects.append(
-                .audit(kind: "enforcement.action_taken", detail: ["action": "lock"]))
             state.lastLockAt = now
         }
 
@@ -232,9 +247,7 @@ public enum Ladder {
         // have returned at the `guard evaluation.isRestricted` above. A
         // corrected policy landing inside the grace window cancels the
         // shutdown for exactly this reason.
-        effects.append(.shutdown)
-        effects.append(
-            .audit(kind: "enforcement.action_taken", detail: ["action": "shutdown"]))
+        effects.append(.shutdown)  // Recorded by the executor, as for `.lock`.
         state.shutdownIssued = true
         return Decision(effects: effects, state: state)
     }

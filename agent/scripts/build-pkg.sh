@@ -26,7 +26,7 @@
 # all three are deliberate: the VERSION carries a `-dev` suffix (in
 # `pkgutil --pkg-info`, and — because `AgentVersion.current` derives it from
 # the same `DEV_ENFORCEMENT` flag — in every binary's `--version`, in the
-# `agent_version` every sync reports, and on the parent's device card), the
+# `agent_version` every sync reports, and as Agent on the parent's device page), the
 # filename carries it, and `install.sh` refuses it without `--allow-dev`. A
 # safe binary installed by accident is an agent that logs "would shut down"
 # for ever and looks completely healthy.

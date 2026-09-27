@@ -72,6 +72,43 @@ struct LadderTests {
         }
     }
 
+    /// ★ The first on-hardware run: a real timer lands ticks 59.x and 60.x s
+    /// apart, and a bare `>= 60` skipped every tick after a late one — 3 of 8
+    /// in an 8-minute window. Exactly-60 s ticks (the test above) cannot see it.
+    @Test("it re-locks on EVERY tick of a jittery 60 s timer")
+    func reLocksDespiteJitter() {
+        var state = Ladder.State()
+        let offsets: [TimeInterval] = [0, 60.4, 119.8, 180.3, 239.7, 300.2, 359.9, 420.5]
+        for (tick, offset) in offsets.enumerated() {
+            let d = Ladder.step(
+                evaluation: Self.evaluation(restricted: true),
+                state: state, now: Self.t0.addingTimeInterval(offset))
+            #expect(Self.hasLock(d), Comment(rawValue: "tick \(tick) at +\(offset)s must re-lock"))
+            state = d.state
+        }
+    }
+
+    @Test("but runaway re-assertion is still throttled — X9")
+    func throttleStillHolds() {
+        let first = Ladder.step(
+            evaluation: Self.evaluation(restricted: true), state: Ladder.State(), now: Self.t0)
+        let soon = Ladder.step(
+            evaluation: Self.evaluation(restricted: true),
+            state: first.state, now: Self.t0.addingTimeInterval(20))
+        #expect(!Self.hasLock(soon))
+    }
+
+    /// The executor records each action's REAL outcome. A record from the
+    /// ladder as well made every lock appear twice — seen in the first real
+    /// run's spool, two identical `action_taken` lines per tick.
+    @Test("the ladder records no action of its own — one record per lock")
+    func noDuplicateActionRecord() {
+        let d = Ladder.step(
+            evaluation: Self.evaluation(restricted: true), state: Ladder.State(), now: Self.t0)
+        #expect(Self.hasLock(d))
+        #expect(!Self.hasAudit(d, "enforcement.action_taken"))
+    }
+
     /// ★ X10. A failed warning is a health signal, never a gate.
     @Test("a FAILED warning does not stop the lock")
     func failedWarningStillLocks() {

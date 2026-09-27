@@ -126,7 +126,7 @@ if [ "$SAFE" -eq 1 ]; then
     exit 1
   fi
   echo "⚠️  Installing the SAFE VARIANT ($REPORTED). This agent will NOT power the Mac off."
-  echo "   It reports that version everywhere, including on the device card."
+  echo "   It reports that version everywhere — the device page shows it as Agent."
 fi
 
 # ── 4. Remote Login — the recovery path.
