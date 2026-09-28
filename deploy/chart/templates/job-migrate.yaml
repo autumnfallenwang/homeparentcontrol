@@ -35,7 +35,9 @@ spec:
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
-          command: ["pnpm", "--filter", "@hpc/api", "exec", "drizzle-kit", "migrate"]
+          # drizzle-kit's own bin, under node — no pnpm wrapper printing banner lines.
+          workingDir: /app/apps/api
+          command: ["node", "node_modules/drizzle-kit/bin.cjs", "migrate"]
           env:
             - name: DATABASE_URL
               valueFrom:

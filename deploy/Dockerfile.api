@@ -37,4 +37,9 @@ USER node
 # actually listens on comes from API_PORT (52001 in k3s).
 EXPOSE 52001
 
-CMD ["pnpm", "--filter", "@hpc/api", "start"]
+# ★ `node` is PID 1, not pnpm. Under `pnpm --filter … start` every start
+# printed ~7 non-JSON banner lines into Loki (they broke `| json` counts over
+# any range that held a deploy), and SIGTERM went to pnpm — the API never saw
+# it, so the graceful shutdown in index.ts could not run.
+WORKDIR /app/apps/api
+CMD ["node", "--import", "tsx", "src/index.ts"]

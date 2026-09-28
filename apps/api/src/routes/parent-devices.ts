@@ -409,8 +409,8 @@ async function endCredential(
   await db.transaction((tx) => endDevice(tx, device, opts));
 
   log.warn(
-    { event: `device.${opts.action}`, device_id: device.id, by: user.id },
-    `device ${opts.action}d by a parent`,
+    { event: `device.${opts.action}`, action: opts.action, device_id: device.id, by: user.id },
+    "device ended by a parent",
   );
 
   return c.json({

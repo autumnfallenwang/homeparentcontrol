@@ -1,4 +1,5 @@
-import { log } from "./logger.js";
+import { randomUUID } from "node:crypto";
+import { log, withLogContext } from "./logger.js";
 
 /**
  * In-process periodic jobs (§5.8).
@@ -45,7 +46,9 @@ async function tick(job: Job): Promise<void> {
   inFlight.add(job.name);
   const startedAt = Date.now();
   try {
-    await job.run();
+    // ★ Every line this run logs — its own and the job's — carries
+    // `{ job, run_id }`, so one run can be pulled up whole in Loki.
+    await withLogContext({ job: job.name, run_id: randomUUID() }, () => job.run());
     log.debug(
       { event: "scheduler.ran", job: job.name, duration_ms: Date.now() - startedAt },
       "scheduled job finished",
@@ -81,6 +84,19 @@ export function stopScheduler(): void {
   for (const [name, timer] of timers) {
     clearInterval(timer);
     timers.delete(name);
+  }
+}
+
+/**
+ * Stop scheduling, then wait for any run already in flight — so a SIGTERM
+ * does not cut the projector off halfway through a bucket. Gives up after
+ * `timeoutMs`; the runs are idempotent, so the next start redoes the work.
+ */
+export async function drainScheduler(timeoutMs: number): Promise<void> {
+  stopScheduler();
+  const deadline = Date.now() + timeoutMs;
+  while (inFlight.size > 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
 

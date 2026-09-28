@@ -24,10 +24,10 @@ import { parentApp } from "./routes/parent.js";
  * and the limiter can key off the raw `x-api-key` header rather than a
  * resolved session. Per-route auth (`requireAuth`) lives on the two sub-apps.
  *
- * ⚠️ There is deliberately NO global `onError`. The parent routes hand-map
- * their errors to the house's flat `{ error }`, and a global handler would
- * swallow them. The agent sub-app gets its own scoped `problem+json` handler
- * in step 4 (§5.8).
+ * The parent routes hand-map their errors to the house's flat `{ error }`;
+ * the global `onError` below only answers a throw nothing handled, and the
+ * agent sub-apps keep their own scoped `problem+json` handler (§5.8,
+ * amended by ADR 0012).
  *
  * Single mount only — no `/api` + `/api/v1` pair and no Sunset header
  * middleware. That machinery exists in homecal to carry a legacy client
@@ -37,6 +37,19 @@ export function createApp() {
   const app = new Hono();
 
   app.use("*", requestLogger);
+
+  /**
+   * ★ The last resort for a THROWN error nothing else handled: the house's
+   * flat `{ error }` and a 500. It does not log — the request line above
+   * already carries `err` at `error` level, as one JSON line. Without it,
+   * Hono's default printed a multi-line stack Loki split into one entry per
+   * line (ADR 0012).
+   *
+   * It swallows nothing: hand-mapped errors are RETURNED responses and never
+   * reach it, and the agent sub-apps keep their own `problem+json` handler,
+   * which Hono applies to their routes first.
+   */
+  app.onError((_err, c) => c.json({ error: "internal" }, 500));
   app.use("*", cors({ origin: config.corsOrigins, credentials: true }));
 
   // Skipped under NODE_ENV=test so the in-memory store cannot bleed between

@@ -16,6 +16,18 @@ import { log } from "./lib/logger.js";
  * `enableSessionForAPIKeys` is what lets a single `requireAuth` serve both.
  */
 export const auth = betterAuth({
+  /**
+   * Better Auth's own output, as one JSON line through pino rather than its
+   * coloured console text — which was the only non-JSON line left at start.
+   * Only the message and an Error travel: its other arguments can be request
+   * data, and nothing here is allowed to guess what is safe to log.
+   */
+  logger: {
+    log: (level, message, ...args) => {
+      const err = args.find((arg) => arg instanceof Error);
+      log[level]({ event: "auth.log", detail: message, ...(err ? { err } : {}) }, "better-auth");
+    },
+  },
   database: drizzleAdapter(db, {
     provider: "pg",
     // better-auth resolves the apiKey model as `schema.apikeys` (plural) under
