@@ -65,20 +65,31 @@ case "$CODE" in
 esac
 
 # ── 1. Build, unless a pkg was handed to us.
+#
+# ⚠️ As the person who ran sudo, not as root. A root build leaves agent/.build
+# owned by root, and every later `swift build` / `swift test` in this clone
+# then fails on permissions. Only the INSTALL needs root.
+build_pkg() {
+  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    sudo -H -u "$SUDO_USER" bash agent/scripts/build-pkg.sh "$@"
+  else
+    bash agent/scripts/build-pkg.sh "$@"
+  fi
+}
 if [ -z "$PKG" ]; then
   VERSION="$(sed -n 's/.*static let base = "\(.*\)"/\1/p' \
     agent/Sources/HPCAgentIO/AgentVersion.swift | head -1)"
   [ -n "$VERSION" ] || { echo "ERROR: could not read the agent version" >&2; exit 1; }
   if [ "$WANT_SAFE" -eq 1 ]; then
     echo "── building $VERSION (SAFE variant — never powers the Mac off)"
-    bash agent/scripts/build-pkg.sh "$VERSION" --dev >/dev/null
+    build_pkg "$VERSION" --dev >/dev/null
     PKG="$ROOT/agent/.build/pkg/homeparentcontrol-$VERSION-dev.pkg"
   else
     echo "── building $VERSION"
     # ⚠️ NOT -DDEV_ENFORCEMENT unless --safe asked for it. A real install must
     # contain the real shutdown. Getting this backwards produces an agent that
     # logs "would shut down" for ever and looks fine.
-    bash agent/scripts/build-pkg.sh "$VERSION" >/dev/null
+    build_pkg "$VERSION" >/dev/null
     PKG="$ROOT/agent/.build/pkg/homeparentcontrol-$VERSION.pkg"
   fi
 fi
