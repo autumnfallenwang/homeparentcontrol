@@ -35,6 +35,8 @@ interface Fixture {
   deviceId: string;
   policySetId: string;
   cookie: string;
+  /** The device's own credential, for calling the agent API as the Mac. */
+  token: string;
 }
 
 async function wipe(): Promise<void> {
@@ -115,6 +117,7 @@ async function seed(): Promise<Fixture> {
     .from(households)
     .where(eq(households.id, householdId))
     .limit(1);
+  let token = "";
   if (serviceUser?.id) {
     const credential = await mintDeviceKey({
       serviceUserId: serviceUser.id,
@@ -122,11 +125,12 @@ async function seed(): Promise<Fixture> {
       householdId,
       label: "Lucy's Mac mini",
     });
+    token = credential.token;
     await db.update(devices).set({ apiKeyId: credential.keyId }).where(eq(devices.id, deviceId));
   }
 
   await publishPolicy({ deviceId, reason: "enrol" });
-  return { householdId, userId, childId, deviceId, policySetId, cookie };
+  return { householdId, userId, childId, deviceId, policySetId, cookie, token };
 }
 
 function get(path: string, f: Fixture) {
@@ -449,6 +453,48 @@ d("Revoke vs Decommission (§5.5)", () => {
       .from(apikeys)
       .where(eq(apikeys.id, device?.apiKeyId ?? ""));
     expect(key?.enabled).toBe(false);
+  });
+
+  /** The Mac's next check-in, made with its own credential. */
+  async function macSyncs(f: Fixture) {
+    const res = await app.request("/api/agent/v1/sync", {
+      method: "POST",
+      headers: { "x-api-key": f.token, "content-type": "application/json" },
+      body: "{}",
+    });
+    return { status: res.status, body: (await res.json()) as { hpc_action?: string } };
+  }
+
+  it("★ decommission keeps the credential, so the Mac's next check-in is told to uninstall", async () => {
+    const f = await seed();
+    expect(f.token).not.toBe("");
+    const response = await send(`/devices/${f.deviceId}/decommission`, f, "POST", {
+      confirm: "DECOMMISSION",
+    });
+    expect(response.status).toBe(200);
+
+    const [device] = await db
+      .select({ apiKeyId: devices.apiKeyId })
+      .from(devices)
+      .where(eq(devices.id, f.deviceId));
+    const [key] = await db
+      .select({ enabled: apikeys.enabled })
+      .from(apikeys)
+      .where(eq(apikeys.id, device?.apiKeyId ?? ""));
+    expect(key?.enabled).toBe(true);
+
+    // The whole point: the one answer that makes the agent uninstall itself.
+    const sync = await macSyncs(f);
+    expect(sync.status).toBe(401);
+    expect(sync.body.hpc_action).toBe("decommission");
+  });
+
+  it("revoke's next check-in is NOT told to uninstall — it keeps enforcing", async () => {
+    const f = await seed();
+    await send(`/devices/${f.deviceId}/revoke`, f, "POST", { confirm: "REVOKE" });
+    const sync = await macSyncs(f);
+    expect(sync.status).toBe(401);
+    expect(sync.body.hpc_action).not.toBe("decommission");
   });
 
   it("★ decommission says enforcement STOPS, and keeps the telemetry", async () => {

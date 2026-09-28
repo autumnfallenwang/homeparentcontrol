@@ -5,6 +5,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../app.js";
 import { closeDb, db } from "../db/index.js";
 import {
+  apikeys,
   children,
   devices,
   events,
@@ -407,6 +408,41 @@ d("POST /events — a decommissioned device", () => {
     );
     expect(status).toBe(202);
     expect(await storedCount(f.deviceId)).toBe(1);
+  });
+
+  async function keyEnabled(deviceId: string): Promise<boolean | undefined> {
+    const [row] = await db
+      .select({ enabled: apikeys.enabled })
+      .from(apikeys)
+      .innerJoin(devices, eq(devices.apiKeyId, apikeys.id))
+      .where(eq(devices.id, deviceId));
+    return row?.enabled ?? undefined;
+  }
+
+  it("★ its final agent.decommissioned report retires the credential", async () => {
+    const f = await seed();
+    await db.update(devices).set({ status: "decommissioned" }).where(eq(devices.id, f.deviceId));
+    expect(await keyEnabled(f.deviceId)).toBe(true);
+
+    const { status } = await post(
+      f.token,
+      batch(f.deviceId, [evt(1, { type: "agent.decommissioned" })]),
+    );
+    expect(status).toBe(202);
+    expect(await keyEnabled(f.deviceId)).toBe(false);
+  });
+
+  it("an ordinary report from a decommissioned device leaves the credential alone", async () => {
+    const f = await seed();
+    await db.update(devices).set({ status: "decommissioned" }).where(eq(devices.id, f.deviceId));
+    await post(f.token, batch(f.deviceId, [evt(1)]));
+    expect(await keyEnabled(f.deviceId)).toBe(true);
+  });
+
+  it("a LIVE device claiming agent.decommissioned keeps its credential", async () => {
+    const f = await seed();
+    await post(f.token, batch(f.deviceId, [evt(1, { type: "agent.decommissioned" })]));
+    expect(await keyEnabled(f.deviceId)).toBe(true);
   });
 
   it("but still cannot sync", async () => {

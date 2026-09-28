@@ -4,10 +4,11 @@ import {
   type EventsResponse,
   eventEnvelope,
 } from "@hpc/contract";
+import { eq, inArray } from "drizzle-orm";
 import type { Context } from "hono";
 import { z } from "zod";
 import { db } from "../db/index.js";
-import { events } from "../db/schema.js";
+import { apikeys, devices, events } from "../db/schema.js";
 import { log } from "../lib/logger.js";
 import { ProblemError } from "../lib/problem.js";
 
@@ -173,6 +174,13 @@ export async function handleEvents(c: Context): Promise<Response> {
     inserted = returned.length;
   }
 
+  // The agent's last word. Decommission leaves the credential alive so the
+  // Mac can hear it (see `handleDecommission`); once the Mac reports that it
+  // has uninstalled itself, the credential has nothing left to do.
+  if (rows.some((row) => row.type === "agent.decommissioned")) {
+    await retireIfDecommissioned(deviceId);
+  }
+
   log.info(
     {
       event: "agent.events",
@@ -237,4 +245,25 @@ function classifyRejection(
   // touch. Rejecting is the narrow exception to R8's never-reject.
   if (paths.has("class")) return { id, reason: "bad_event_class", fields };
   return { id, reason: "schema", fields };
+}
+
+/** Disable a decommissioned device's credentials — never a live device's. */
+async function retireIfDecommissioned(deviceId: string): Promise<void> {
+  const [device] = await db
+    .select({
+      status: devices.status,
+      apiKeyId: devices.apiKeyId,
+      previous: devices.previousApiKeyId,
+    })
+    .from(devices)
+    .where(eq(devices.id, deviceId));
+  if (device?.status !== "decommissioned") return;
+  const keys = [device.apiKeyId, device.previous].filter(Boolean) as string[];
+  if (keys.length > 0) {
+    await db.update(apikeys).set({ enabled: false }).where(inArray(apikeys.id, keys));
+  }
+  log.info(
+    { event: "device.decommission_confirmed", device_id: deviceId },
+    "the agent confirmed its decommission; credential retired",
+  );
 }

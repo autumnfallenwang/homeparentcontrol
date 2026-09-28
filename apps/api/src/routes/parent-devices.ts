@@ -319,6 +319,15 @@ export async function handleRevoke(c: Context<{ Variables: ParentVariables }>) {
  *
  * ⚠️ **All telemetry is retained** — "the child's history is not the device's
  * property".
+ *
+ * ⚠️ **The credential stays ALIVE.** This used to disable it exactly as revoke
+ * does — so the Mac's next `/sync` failed authentication, got a bare 401,
+ * mapped it to `halt_sync_keep_enforcing`, and never heard the one answer
+ * that uninstalls it. Decommission ended nothing, and nothing said so. Found
+ * on the first real decommission (2026-09-28): 200 here, then 401 on the very
+ * next sync, and the agent still fully installed four minutes later. The
+ * credential is retired by `/events` when the agent's final
+ * `agent.decommissioned` report arrives.
  */
 export async function handleDecommission(c: Context<{ Variables: ParentVariables }>) {
   return endCredential(c, {
@@ -326,6 +335,7 @@ export async function handleDecommission(c: Context<{ Variables: ParentVariables
     confirmWord: "DECOMMISSION",
     status: "decommissioned",
     dropDesired: true,
+    keepCredential: true,
   });
 }
 
@@ -336,6 +346,8 @@ async function endCredential(
     confirmWord: string;
     status: string;
     dropDesired: boolean;
+    /** Decommission only: the device must still authenticate to be told. */
+    keepCredential?: boolean;
   },
 ) {
   const householdId = c.get("householdId");
@@ -360,13 +372,19 @@ async function endCredential(
   if (!device) return fail(c, 404, "no such device");
 
   await db.transaction(async (tx) => {
-    // Both keys — the current one and any inside a rotation overlap.
-    for (const keyId of [device.apiKeyId, device.previous].filter(Boolean) as string[]) {
-      await tx.update(apikeys).set({ enabled: false }).where(eq(apikeys.id, keyId));
+    if (!opts.keepCredential) {
+      // Both keys — the current one and any inside a rotation overlap.
+      for (const keyId of [device.apiKeyId, device.previous].filter(Boolean) as string[]) {
+        await tx.update(apikeys).set({ enabled: false }).where(eq(apikeys.id, keyId));
+      }
     }
     await tx
       .update(devices)
-      .set({ status: opts.status, previousApiKeyId: null, previousApiKeyExpiresAt: null })
+      .set({
+        status: opts.status,
+        // Kept while the credential lives: the agent may be mid-rotation.
+        ...(opts.keepCredential ? {} : { previousApiKeyId: null, previousApiKeyExpiresAt: null }),
+      })
       .where(eq(devices.id, device.id));
 
     if (opts.dropDesired) {
