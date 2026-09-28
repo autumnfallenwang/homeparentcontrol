@@ -1,13 +1,7 @@
-import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import {
-  agentStatusIntervals,
-  children,
-  devices,
-  enforcementLog,
-  usageDaily,
-  usageHourly,
-} from "../db/schema.js";
+import { agentStatusIntervals, children, devices, usageDaily, usageHourly } from "../db/schema.js";
+import { type HistoryRow, loadHistory } from "./history.js";
 
 /**
  * §5.8's **one query service, four sinks** (D.2).
@@ -77,15 +71,23 @@ export interface ReportPayload {
     grain: Grain;
   };
   generatedAt: string;
-  totals: { foregroundS: number; activeS: number; reportedBuckets: number; gapBuckets: number };
+  totals: {
+    foregroundS: number;
+    activeS: number;
+    reportedBuckets: number;
+    gapBuckets: number;
+    /** ★ How many times the Mac was turned on in the window. */
+    startups: number;
+  };
   buckets: UsageBucket[];
-  /** "THIS IS THE PRODUCT, what a parent means when they ask *but what actually happened?*" */
-  enforcement: {
-    at: string;
-    kind: string;
-    summary: string;
-    deviceId: string;
-  }[];
+  /**
+   * "THIS IS THE PRODUCT, what a parent means when they ask *but what actually
+   * happened?*" — presented by `history.ts`, so a power cycle is two red lines
+   * and a rule change says why.
+   */
+  enforcement: HistoryRow[];
+  /** More history existed than was read: the list and `startups` are floors. */
+  enforcementTruncated: boolean;
   /** Health history, so a gap in the chart has an explanation next to it. */
   gaps: { from: string; to: string | null; state: string; reason: string | null }[];
 }
@@ -114,7 +116,13 @@ export async function reportQuery(request: ReportRequest): Promise<ReportPayload
     bucket.reported = coversAny(reported, bucket.bucket, request.grain);
   }
 
-  const enforcement = await enforcementRows(request);
+  const history = await loadHistory({
+    householdId: request.householdId,
+    childId: request.childId,
+    deviceId: request.deviceId,
+    from: request.from,
+    to: request.to,
+  });
   const gaps = await gapRows(request);
 
   return {
@@ -132,9 +140,11 @@ export async function reportQuery(request: ReportRequest): Promise<ReportPayload
       activeS: buckets.reduce((sum, b) => sum + b.activeS, 0),
       reportedBuckets: buckets.filter((b) => b.reported).length,
       gapBuckets: buckets.filter((b) => !b.reported).length,
+      startups: history.startups,
     },
     buckets,
-    enforcement,
+    enforcement: history.rows,
+    enforcementTruncated: history.truncated,
     gaps,
   };
 }
@@ -261,6 +271,7 @@ async function reportedRanges(request: ReportRequest): Promise<Range[]> {
     inArray(agentStatusIntervals.state, REPORTING_STATES),
   ];
   if (request.deviceId) scope.push(eq(agentStatusIntervals.deviceId, request.deviceId));
+  if (request.childId) scope.push(childDevices(request.childId));
 
   const rows = await db
     .select({
@@ -285,36 +296,7 @@ function coversAny(ranges: Range[], bucket: string, grain: Grain): boolean {
   return ranges.some((range) => range.from < end && range.to > start);
 }
 
-// ── The enforcement log, and the gaps
-
-async function enforcementRows(request: ReportRequest): Promise<ReportPayload["enforcement"]> {
-  const scope = [
-    eq(enforcementLog.householdId, request.householdId),
-    gte(enforcementLog.occurredAt, request.from),
-    lt(enforcementLog.occurredAt, request.to),
-  ];
-  if (request.childId) scope.push(eq(enforcementLog.childId, request.childId));
-  if (request.deviceId) scope.push(eq(enforcementLog.deviceId, request.deviceId));
-
-  const rows = await db
-    .select({
-      occurredAt: enforcementLog.occurredAt,
-      kind: enforcementLog.kind,
-      summary: enforcementLog.summary,
-      deviceId: enforcementLog.deviceId,
-    })
-    .from(enforcementLog)
-    .where(and(...scope))
-    .orderBy(desc(enforcementLog.occurredAt))
-    .limit(500);
-
-  return rows.map((row) => ({
-    at: row.occurredAt.toISOString(),
-    kind: row.kind,
-    summary: row.summary,
-    deviceId: row.deviceId,
-  }));
-}
+// ── The gaps
 
 async function gapRows(request: ReportRequest): Promise<ReportPayload["gaps"]> {
   const scope = [
@@ -323,6 +305,7 @@ async function gapRows(request: ReportRequest): Promise<ReportPayload["gaps"]> {
     sql`${agentStatusIntervals.state} <> 'HEALTHY'`,
   ];
   if (request.deviceId) scope.push(eq(agentStatusIntervals.deviceId, request.deviceId));
+  if (request.childId) scope.push(childDevices(request.childId));
 
   const rows = await db
     .select({
@@ -343,6 +326,18 @@ async function gapRows(request: ReportRequest): Promise<ReportPayload["gaps"]> {
       state: row.state,
       reason: row.reason,
     }));
+}
+
+/**
+ * ⚠️ Health intervals carry no child, so a child's report must scope them
+ * through the child's devices — before this, one child's report counted
+ * every device in the house as "reporting" or "silent".
+ */
+function childDevices(childId: string) {
+  return inArray(
+    agentStatusIntervals.deviceId,
+    db.select({ id: devices.id }).from(devices).where(eq(devices.childId, childId)),
+  );
 }
 
 function isoDay(date: Date): string {

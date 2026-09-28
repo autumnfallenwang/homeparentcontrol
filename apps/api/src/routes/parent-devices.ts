@@ -8,11 +8,11 @@ import {
   children,
   desiredItems,
   devices,
-  enforcementLog,
   enrollments,
   sessionSpans,
   tripwires,
 } from "../db/schema.js";
+import { loadHistory } from "../lib/history.js";
 import { log } from "../lib/logger.js";
 import { soakReport } from "../lib/soak.js";
 import { fail, type ParentVariables } from "./parent-context.js";
@@ -124,17 +124,9 @@ export async function handleDevice(c: Context<{ Variables: ParentVariables }>) {
       .where(and(eq(sessionSpans.deviceId, deviceId), gte(sessionSpans.startedAt, weekAgo)))
       .orderBy(desc(sessionSpans.startedAt))
       .limit(500),
-    db
-      .select({
-        kind: enforcementLog.kind,
-        summary: enforcementLog.summary,
-        occurredAt: enforcementLog.occurredAt,
-        policyVersion: enforcementLog.policyVersion,
-      })
-      .from(enforcementLog)
-      .where(and(eq(enforcementLog.deviceId, deviceId), gte(enforcementLog.occurredAt, weekAgo)))
-      .orderBy(desc(enforcementLog.occurredAt))
-      .limit(200),
+    // No upper bound on purpose: a Mac whose clock runs ahead stamps its rows
+    // in the future, and hiding them would hide the evidence.
+    loadHistory({ householdId, deviceId, from: weekAgo, limit: 1_000 }),
     db
       .select({
         id: tripwires.id,
@@ -202,11 +194,12 @@ export async function handleDevice(c: Context<{ Variables: ParentVariables }>) {
       started_at: row.startedAt.toISOString(),
       ended_at: row.endedAt?.toISOString() ?? null,
     })),
-    enforcement: recent.map((row) => ({
+    enforcement: recent.rows.map((row) => ({
       kind: row.kind,
       summary: row.summary,
-      at: row.occurredAt.toISOString(),
+      at: row.at,
       policy_version: row.policyVersion,
+      tone: row.tone,
     })),
     tripwires: wires.map((row) => ({
       id: row.id,

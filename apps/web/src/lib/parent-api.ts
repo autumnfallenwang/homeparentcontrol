@@ -166,7 +166,7 @@ export interface DeviceDetail {
     reclassified_from: string | null;
   }[];
   session_spans: { kind: string; started_at: string; ended_at: string | null }[];
-  enforcement: { kind: string; summary: string; at: string; policy_version: number | null }[];
+  enforcement: HistoryItem[];
   tripwires: {
     id: string;
     kind: string;
@@ -338,10 +338,29 @@ export const upsertException = (input: {
 
 // ── Reports
 
+/**
+ * One line of "What actually happened", already presented by the server:
+ * a power cycle is two `alarm` lines, a rule change says why.
+ */
+export interface HistoryItem {
+  kind: string;
+  summary: string;
+  at: string;
+  /** ★ `alarm` is drawn red — the Mac turning on or off. */
+  tone: "alarm" | "plain";
+}
+
 export interface ReportPayload {
   request: { from: string; to: string; grain: "hour" | "day" };
   generatedAt: string;
-  totals: { foregroundS: number; activeS: number; reportedBuckets: number; gapBuckets: number };
+  totals: {
+    foregroundS: number;
+    activeS: number;
+    reportedBuckets: number;
+    gapBuckets: number;
+    /** Times the Mac was turned on in the window. */
+    startups: number;
+  };
   buckets: {
     bucket: string;
     foregroundS: number;
@@ -350,7 +369,9 @@ export interface ReportPayload {
     /** ★ False means NO DATA, which is not the same as zero usage. */
     reported: boolean;
   }[];
-  enforcement: { at: string; kind: string; summary: string; deviceId: string }[];
+  enforcement: (HistoryItem & { deviceId: string })[];
+  /** More history existed than the server read: the list and `startups` are floors. */
+  enforcementTruncated: boolean;
   gaps: { from: string; to: string | null; state: string; reason: string | null }[];
   labels: {
     children: { id: string; displayName: string }[];

@@ -57,6 +57,21 @@ export function dayAndTime(iso: string | null | undefined): string {
   });
 }
 
+/**
+ * "Mon, Sep 28, 12:21 PM" — with the date, for lists a date range can make
+ * longer than a week, where a bare weekday is ambiguous.
+ */
+export function dateAndTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /** `com.apple.Safari` → `Safari`. Falls back to the whole id. */
 export function appName(bundleId: string): string {
   if (bundleId === "other") return "Everything else";

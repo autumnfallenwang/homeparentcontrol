@@ -4,6 +4,7 @@ import { healthPhrasing } from "@hpc/contract";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { HistoryList } from "../../../../components/history-list.js";
 import { Page } from "../../../../components/shell/page.js";
 import { Button, Card, ErrorNote, Field, inputClass, Spinner } from "../../../../components/ui.js";
 import { dayAndTime, humanDuration, weekdayOf } from "../../../../lib/format.js";
@@ -254,18 +255,7 @@ function EnforcementCard({ detail }: { detail: DeviceDetail }) {
   return (
     <Card>
       <h2 className="font-heading text-lg font-medium tracking-tight">What actually happened</h2>
-      {detail.enforcement.length === 0 ? (
-        <p className="mt-2 text-sm text-muted-foreground">Nothing in the last 7 days.</p>
-      ) : (
-        <ul className="mt-3 space-y-2 text-sm">
-          {detail.enforcement.slice(0, 40).map((row) => (
-            <li key={`${row.kind}-${row.at}`} className="flex flex-wrap gap-2">
-              <span className="w-40 shrink-0 text-muted-foreground">{dayAndTime(row.at)}</span>
-              <span className="text-foreground">{row.summary}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      <HistoryList rows={detail.enforcement} limit={60} empty="Nothing in the last 7 days." />
     </Card>
   );
 }
