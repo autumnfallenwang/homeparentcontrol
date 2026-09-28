@@ -280,6 +280,35 @@ than no alert because it is trusted.
 
 ---
 
+## After every deploy: the log check
+
+Two minutes, and it catches a deploy that quietly stopped logging, or started logging wrong.
+
+```bash
+ID="postdeploy-$(date +%Y%m%d-%H%M)"
+# A 404: must come back with our id echoed, and log one warn line.
+curl -s -o /dev/null -D - -H "X-Request-Id: $ID" \
+  http://homeparentcontrol-api.arch.internal/api/nope | grep -i x-request-id
+# A 401 on the agent API: must still be problem+json (the global onError swallows nothing).
+curl -s -D - -o /dev/null -X POST -H 'content-type: application/json' -d '{}' \
+  http://homeparentcontrol-api.arch.internal/api/agent/v1/sync | grep -iE '^HTTP|content-type'
+```
+
+Then, in Grafana → Explore:
+
+1. `{namespace="homeparentcontrol"} | json | req_id="<the id>"`: exactly one line, `level` `"warn"`,
+   `status` 404.
+2. **The control.** `{namespace="homeparentcontrol", container="api"} | json | event="agent.sync"`
+   over 5 minutes must return lines. If it doesn't, query 1 returning nothing proves nothing.
+3. The new pod's first lines are all JSON: `{namespace="homeparentcontrol", container="api"}
+   !~ "^\\{"` over the deploy window returns **nothing**.
+4. `detected_level` is set: the 404 line shows as a warning (yellow) in Explore, not "unknown".
+
+A 5xx cannot be provoked safely in production. The query shape for it is the same as the 4xx one,
+and `logger.test.ts` / `middleware/logger.test.ts` prove that a thrown error logs at `error` with
+`err`. A 429 can be provoked by hammering `/api/nope`, but that rate-limits your own browser for a
+minute. It's optional.
+
 ## 9. Point the agent at the cluster
 
 ⚠️ **One setting, no code change** — hypothesis H1, and this is where it

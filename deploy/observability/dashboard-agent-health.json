@@ -182,7 +182,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{namespace=\"homeparentcontrol\"} | json | level >= 40",
+          "expr": "{namespace=\"homeparentcontrol\"} | json | level=~\"warn|error|fatal|40|50|60\"",
           "refId": "A"
         }
       ]

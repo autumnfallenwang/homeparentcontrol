@@ -73,6 +73,8 @@ When something needs recording, walk down in order:
   One Mac against the deployed cluster, safe build, nothing powers off
 - [`docs/architecture.md`](docs/architecture.md) — current system shape
 - [`docs/adr/`](docs/adr/) — append-only decision history
+- [`deploy/observability/README.md`](deploy/observability/README.md) — logs in Loki: the shape,
+  a cheat-sheet of queries checked against live Loki, and what Grafana has installed
 - [`docs/milestones/`](docs/milestones/) — work plans + progress notes
 - [`knowledge/KNOWLEDGE.md`](knowledge/KNOWLEDGE.md) — team-shared knowledge index
 

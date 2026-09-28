@@ -1,0 +1,317 @@
+{
+  "uid": "home-http-overview",
+  "title": "Home apps \u2014 HTTP overview",
+  "description": "One dashboard for every home app: they all log the same http.request shape (see ADR 0012 in homeparentcontrol). Pick the app with the namespace variable.",
+  "tags": [
+    "home-apps",
+    "http",
+    "loki"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "label": "App",
+        "type": "custom",
+        "query": "homeparentcontrol,homework,homecal,homenews,llmgw",
+        "current": {
+          "text": "homeparentcontrol",
+          "value": "homeparentcontrol"
+        },
+        "options": [
+          {
+            "text": "homeparentcontrol",
+            "value": "homeparentcontrol",
+            "selected": true
+          },
+          {
+            "text": "homework",
+            "value": "homework",
+            "selected": false
+          },
+          {
+            "text": "homecal",
+            "value": "homecal",
+            "selected": false
+          },
+          {
+            "text": "homenews",
+            "value": "homenews",
+            "selected": false
+          },
+          {
+            "text": "llmgw",
+            "value": "llmgw",
+            "selected": false
+          }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Requests per 5 minutes, by status class",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({namespace=\"$namespace\", container=~\"api|llmgw\"} | json | __error__=\"\" | event=\"http.request\" | status < 400 [5m]))",
+          "queryType": "range",
+          "legendFormat": "2xx/3xx"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({namespace=\"$namespace\", container=~\"api|llmgw\"} | json | __error__=\"\" | event=\"http.request\" | status >= 400 | status < 500 [5m]))",
+          "queryType": "range",
+          "legendFormat": "4xx"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({namespace=\"$namespace\", container=~\"api|llmgw\"} | json | __error__=\"\" | event=\"http.request\" | status >= 500 [5m]))",
+          "queryType": "range",
+          "legendFormat": "5xx"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "description": "Every app logs one http.request line per request. Apps that still log /health include their probes here."
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "p95 latency (ms)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "quantile_over_time(0.95, {namespace=\"$namespace\", container=~\"api|llmgw\"} | json | __error__=\"\" | event=\"http.request\" | unwrap latency_ms | __error__=\"\" [5m]) by ()",
+          "queryType": "range",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "5xx in the selected range",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 6,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({namespace=\"$namespace\", container=~\"api|llmgw\"} | json | __error__=\"\" | event=\"http.request\" | status >= 500 [$__range])) or vector(0)",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Error lines by event",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 8,
+        "w": 18,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (event) (count_over_time({namespace=\"$namespace\"} | json | __error__=\"\" | level=~\"error|fatal|50|60\" [5m]))",
+          "queryType": "range",
+          "legendFormat": "{{event}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "description": "Levels are words since ADR 0012; the numbers match lines written before it and apps not yet switched."
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Slowest paths (average ms, selected range)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "topk(10, avg by (path) (avg_over_time({namespace=\"$namespace\", container=~\"api|llmgw\"} | json | __error__=\"\" | event=\"http.request\" | unwrap latency_ms | __error__=\"\" [$__range])))",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "average ms"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "average ms",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "logs",
+      "title": "Error lines",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 14,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{namespace=\"$namespace\"} | json | __error__=\"\" | level=~\"error|fatal|50|60\"",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending"
+      }
+    }
+  ]
+}

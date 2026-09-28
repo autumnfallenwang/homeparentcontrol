@@ -191,8 +191,13 @@ Still to do:
       There is **no contact point, no notification policy and no SMTP**
       anywhere in that cluster — not for this app and not for `homework`,
       `homecal` or `homenews`. **Any of them could be silently broken right
-      now.** The five alert rules are written and their queries verified
-      against live Loki, so they will *fire*; nothing carries them.
+      now.** ✅ Since 2026-09-28 the five alert rules are **installed** in Grafana
+      (`arch-infra@83f2810`, Loki pinned to `uid: loki`) and evaluating with
+      `health=ok`. So they *fire*; nothing carries them.
+
+      ⚠️ **Tune A1 before wiring a channel.** "Agent unexpectedly silent" matched
+      102 five-minute windows in one day, mostly Macs asleep. With a channel
+      attached as it is, it would page every night.
 
       Two ready options in `deploy/observability/alerting-contactpoints.yaml.example`
       (ntfy — no account, self-hostable; or SMTP). Then **cause an alert and
@@ -214,6 +219,19 @@ Still to do:
 ---
 
 ## 📋 Known gaps — recorded, not yet anyone's action
+
+- **The agent's `boot_id` is per process, not per boot** (ADR 0013). Nothing relies on it any
+  more: power-ons come from uptime at `/sync`. Sending the kernel's boot session UUID would need
+  every Mac reinstalled. Worth doing only with some other agent change.
+- **Next's startup banner** (`✓ Ready in …`) is the web container's only non-JSON output. It is
+  harmless; real web errors are one JSON line each (ADR 0012).
+- **Other home apps, found on 2026-09-28** (not this repo, recorded so they are not lost):
+  - ⚠️ `llm-gateway` commits the **Grafana admin password** in plain text at
+    `docs/k3s-migration/02-K3S_REFERENCE.md:167`. Change it and remove it.
+  - `homenews` web logs `TypeError: controller[kState].transformAlgorithm is not a function`
+    ~650×/day, as multi-line text nobody sees.
+  - All four still write numeric levels, start with `pnpm`/`npm start`, and log `/health`. ADR 0012
+    is the fix, and the "Home apps — HTTP overview" dashboard already covers them.
 
 - ⏰ **The shared deploy token expires 2027-05-10.** One fine-grained token (`arch-infra-bump`,
   write to `arch-infra` only) is the `ARCH_INFRA_TOKEN` secret in homework, homecal, homenews and
