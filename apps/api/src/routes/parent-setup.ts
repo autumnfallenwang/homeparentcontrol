@@ -1,4 +1,4 @@
-import { and, eq, isNull, ne } from "drizzle-orm";
+import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { z } from "zod";
 import { db } from "../db/index.js";
@@ -12,6 +12,7 @@ import {
 } from "../lib/enrolment-codes.js";
 import { log } from "../lib/logger.js";
 import { fail, type ParentVariables } from "./parent-context.js";
+import { DECOMMISSION, endDevice } from "./parent-devices.js";
 
 /**
  * `/setup` — add a child, add a Mac, get a code to type into the installer.
@@ -53,6 +54,65 @@ export async function handleCreateChild(c: Context<{ Variables: ParentVariables 
   return c.json({ child_id: child.id, policy_set_id: set?.id ?? null }, 201);
 }
 
+const removeChildBody = z.object({ confirm: z.literal("REMOVE") });
+
+/**
+ * `POST /api/parent/v1/children/:id/remove`
+ *
+ * Removes every device the child still has — exactly as Remove does to one
+ * device — and archives the child, in one transaction (ADR 0011).
+ *
+ * ⚠️ **Archived, never deleted.** `devices.child_id` is `ON DELETE RESTRICT`
+ * and removed devices are kept for their history, so a real delete would
+ * either fail or take that history with it. "The child's history is not the
+ * device's property" (§5.5) — nor is it the page's.
+ *
+ * ⚠️ The confirm word is checked here too, as for a device: this stops
+ * enforcement on every Mac the child has, and must not be the easier path.
+ */
+export async function handleRemoveChild(c: Context<{ Variables: ParentVariables }>) {
+  const householdId = c.get("householdId");
+  const user = c.get("user");
+  const childId = c.req.param("id");
+  if (!childId) return fail(c, 400, "missing child id");
+
+  if (!removeChildBody.safeParse(await c.req.json().catch(() => null)).success) {
+    return fail(c, 422, "type REMOVE to confirm");
+  }
+
+  const [child] = await db
+    .select({ id: children.id })
+    .from(children)
+    .where(
+      and(
+        eq(children.id, childId),
+        eq(children.householdId, householdId),
+        isNull(children.archivedAt),
+      ),
+    )
+    .limit(1);
+  if (!child) return fail(c, 404, "no such child");
+
+  const removed = await db.transaction(async (tx) => {
+    const live = await tx
+      .select({ id: devices.id, apiKeyId: devices.apiKeyId, previous: devices.previousApiKeyId })
+      .from(devices)
+      .where(and(eq(devices.childId, child.id), ne(devices.status, "decommissioned")));
+    for (const device of live) await endDevice(tx, device, DECOMMISSION);
+    await tx
+      .update(children)
+      .set({ archivedAt: sql`now()`, updatedAt: sql`now()` })
+      .where(eq(children.id, child.id));
+    return live.length;
+  });
+
+  log.warn(
+    { event: "child.removed", child_id: child.id, devices_removed: removed, by: user.id },
+    "child removed by a parent",
+  );
+  return c.json({ child_id: child.id, devices_removed: removed });
+}
+
 const deviceBody = z.object({
   child_id: z.uuid(),
   label: z.string().min(1).max(80),
@@ -74,7 +134,13 @@ export async function handleCreateDevice(c: Context<{ Variables: ParentVariables
   const [child] = await db
     .select({ id: children.id })
     .from(children)
-    .where(and(eq(children.id, parsed.data.child_id), eq(children.householdId, householdId)))
+    .where(
+      and(
+        eq(children.id, parsed.data.child_id),
+        eq(children.householdId, householdId),
+        isNull(children.archivedAt),
+      ),
+    )
     .limit(1);
   if (!child) return fail(c, 404, "no such child");
 
@@ -176,7 +242,7 @@ export async function handleSetupState(c: Context<{ Variables: ParentVariables }
     db
       .select({ id: children.id, displayName: children.displayName, timezone: children.timezone })
       .from(children)
-      .where(eq(children.householdId, householdId)),
+      .where(and(eq(children.householdId, householdId), isNull(children.archivedAt))),
     db
       .select({
         id: devices.id,
@@ -224,7 +290,10 @@ export async function handleSetupState(c: Context<{ Variables: ParentVariables }
 export async function handleGetSettings(c: Context<{ Variables: ParentVariables }>) {
   const householdId = c.get("householdId");
   const sets = await db.select().from(policySets).where(eq(policySets.householdId, householdId));
-  const childRows = await db.select().from(children).where(eq(children.householdId, householdId));
+  const childRows = await db
+    .select()
+    .from(children)
+    .where(and(eq(children.householdId, householdId), isNull(children.archivedAt)));
   return c.json({ children: childRows, policy_sets: sets });
 }
 

@@ -43,3 +43,14 @@ Ending a device, by either endpoint, now also deletes its unused setup codes.
 - A one-click confirm is easier to hit by mistake than a typed word. It is also recoverable: the child
   is still there, and setting the Mac up again takes a new code and one pasted command.
 - §5.5's "typed-confirmation actions" line in `design-decisions.md` is amended by this ADR.
+
+## Notes
+
+- **2026-09-28 — Removing a child.** Each child card has the same in-place Remove, via
+  `POST /children/:id/remove` with confirm word `REMOVE`, checked on the server. In one transaction it
+  removes every device the child still has, through the same `endDevice` used by Decommission, and
+  sets `children.archived_at`. The child is **archived, never deleted**: `devices.child_id` is
+  `ON DELETE RESTRICT` and removed devices are kept for history, so a real delete would fail or take
+  that history with it. Archived children are left out of `/setup` (Settings and the Viewing switch),
+  `/rules` and `/settings`, and can't be given a device or a calendar exception. Report labels still
+  include them, so old data keeps its names. There is no restore; add the child again.

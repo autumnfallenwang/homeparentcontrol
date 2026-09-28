@@ -188,6 +188,51 @@ export const REMOVE_DEVICE = {
   },
 } as const;
 
+/**
+ * ★ Removing a child removes every device they still have, and archives the
+ * child (ADR 0011). The sentence counts what is actually about to happen, from
+ * the statuses of the child's devices — removed ones are ignored.
+ */
+export const REMOVE_CHILD = {
+  label: "Remove",
+  /** The word the server checks. The UI sends it once Remove is confirmed. */
+  confirmWord: "REMOVE",
+  question(child: string): string {
+    return `Remove ${child}?`;
+  },
+  consequence(child: string, deviceStatuses: readonly string[]): string {
+    const live = deviceStatuses.filter((status) => status !== "decommissioned");
+    const setUp = live.filter((status) => status === "enrolled" || status === "active").length;
+    const revoked = live.filter((status) => status === "revoked").length;
+    if (live.length === 0) return `${child} leaves this list. Their history is kept.`;
+
+    let text =
+      live.length === 1
+        ? "Their device is removed too"
+        : `Their ${live.length} devices are removed too`;
+    if (setUp === 0) {
+      text += ".";
+    } else if (setUp === live.length) {
+      text +=
+        setUp === 1
+          ? ": it uninstalls its agent at its next check-in and stops enforcing bedtime."
+          : ": each uninstalls its agent at its next check-in and stops enforcing bedtime.";
+    } else {
+      text +=
+        setUp === 1
+          ? ": the one that is set up uninstalls its agent at its next check-in and stops enforcing bedtime."
+          : `: the ${setUp} that are set up each uninstall their agent at the next check-in and stop enforcing bedtime.`;
+    }
+    if (revoked > 0) {
+      text +=
+        revoked === 1
+          ? " A revoked one cannot be told to uninstall, and keeps enforcing its last rules until it is removed on the Mac itself."
+          : ` ${revoked} revoked ones cannot be told to uninstall, and keep enforcing their last rules until removed on each Mac.`;
+    }
+    return `${text} Their history is kept.`;
+  },
+} as const;
+
 // ── 4. The `active_s` label (§5.8).
 
 /** ★ "Screen time" reads as "time the Mac was switched on". It is not that. */

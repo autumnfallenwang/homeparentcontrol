@@ -7,6 +7,7 @@ import {
   healthPhrasing,
   LATE_GRANT_DOES_NOT_UNLOCK,
   lateGrantDoesNotUnlock,
+  REMOVE_CHILD,
   REMOVE_DEVICE,
   shadowModeNotEnforcing,
 } from "./wording.js";
@@ -153,6 +154,50 @@ describe("3. Removing a device (§5.5)", () => {
   // The server still checks a word; it is the Decommission endpoint's.
   it("sends the word the decommission endpoint checks", () => {
     expect(REMOVE_DEVICE.confirmWord).toBe("DECOMMISSION");
+  });
+});
+
+describe("3b. Removing a child (ADR 0011)", () => {
+  it("a child with no devices only leaves the list", () => {
+    expect(REMOVE_CHILD.consequence("Lucy", [])).toBe(
+      "Lucy leaves this list. Their history is kept.",
+    );
+    // Removed devices are history, not something about to happen.
+    expect(REMOVE_CHILD.consequence("Lucy", ["decommissioned"])).toBe(
+      "Lucy leaves this list. Their history is kept.",
+    );
+  });
+
+  it("★ a set-up device is told to stop enforcing, in those words", () => {
+    const text = REMOVE_CHILD.consequence("Lucy", ["active"]);
+    expect(text).toBe(
+      "Their device is removed too: it uninstalls its agent at its next check-in and stops enforcing bedtime. Their history is kept.",
+    );
+  });
+
+  it("counts which devices are set up and which are not", () => {
+    expect(REMOVE_CHILD.consequence("Lucy", ["active", "pending"])).toContain(
+      "Their 2 devices are removed too: the one that is set up uninstalls its agent",
+    );
+    expect(REMOVE_CHILD.consequence("Lucy", ["active", "enrolled"])).toContain(
+      "each uninstalls its agent",
+    );
+    expect(REMOVE_CHILD.consequence("Lucy", ["pending"])).toBe(
+      "Their device is removed too. Their history is kept.",
+    );
+  });
+
+  // ⚠️ Same rule as for one device: never promise an uninstall it cannot hear.
+  it("★ a revoked device is not promised an uninstall", () => {
+    const text = REMOVE_CHILD.consequence("Lucy", ["revoked"]);
+    expect(text).not.toContain("uninstalls its agent");
+    expect(text).toContain("cannot be told to uninstall");
+    expect(text).toContain("keeps enforcing its last rules");
+  });
+
+  it("asks about the child by name, and sends the word the server checks", () => {
+    expect(REMOVE_CHILD.question("Lucy")).toBe("Remove Lucy?");
+    expect(REMOVE_CHILD.confirmWord).toBe("REMOVE");
   });
 });
 

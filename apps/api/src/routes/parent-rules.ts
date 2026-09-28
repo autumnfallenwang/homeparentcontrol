@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { Context } from "hono";
 import { z } from "zod";
 import { db } from "../db/index.js";
@@ -73,7 +73,7 @@ export async function handleGetRules(c: Context<{ Variables: ParentVariables }>)
     db
       .select({ id: children.id, displayName: children.displayName, timezone: children.timezone })
       .from(children)
-      .where(eq(children.householdId, householdId)),
+      .where(and(eq(children.householdId, householdId), isNull(children.archivedAt))),
   ]);
 
   return c.json({
@@ -617,7 +617,13 @@ export async function handleUpsertException(c: Context<{ Variables: ParentVariab
   const [child] = await db
     .select({ id: children.id })
     .from(children)
-    .where(and(eq(children.id, body.child_id), eq(children.householdId, householdId)))
+    .where(
+      and(
+        eq(children.id, body.child_id),
+        eq(children.householdId, householdId),
+        isNull(children.archivedAt),
+      ),
+    )
     .limit(1);
   if (!child) return fail(c, 404, "no such child");
 

@@ -1,4 +1,9 @@
-import { type HealthState, REMOVE_DEVICE, type TripwireSeverity } from "@hpc/contract";
+import {
+  type HealthState,
+  REMOVE_CHILD,
+  REMOVE_DEVICE,
+  type TripwireSeverity,
+} from "@hpc/contract";
 import { apiBaseUrl } from "./api.js";
 
 /**
@@ -195,6 +200,12 @@ export const setAway = (id: string, until: string) =>
 export const removeDevice = (id: string) =>
   post<{ status: string; stops_enforcement: boolean }>(`/devices/${id}/decommission`, {
     confirm: REMOVE_DEVICE.confirmWord,
+  });
+
+/** Remove a child: every device they still have is removed, and they are archived. */
+export const removeChild = (id: string) =>
+  post<{ child_id: string; devices_removed: number }>(`/children/${id}/remove`, {
+    confirm: REMOVE_CHILD.confirmWord,
   });
 
 // ── Overrides

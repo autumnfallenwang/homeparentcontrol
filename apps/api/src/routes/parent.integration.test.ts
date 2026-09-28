@@ -543,6 +543,117 @@ d("Revoke vs Decommission (§5.5)", () => {
   });
 });
 
+d("removing a child (ADR 0011)", () => {
+  beforeEach(wipe);
+
+  const remove = (f: Fixture, childId: string, confirm: unknown = "REMOVE") =>
+    send(`/children/${childId}/remove`, f, "POST", { confirm });
+
+  async function statusOf(deviceId: string) {
+    const [row] = await db
+      .select({ status: devices.status })
+      .from(devices)
+      .where(eq(devices.id, deviceId));
+    return row?.status;
+  }
+
+  it("★ removes every device the child has — and a set-up one is told to uninstall", async () => {
+    const f = await seed();
+    const spare = (await (
+      await send("/devices", f, "POST", { child_id: f.childId, label: "Spare Mac" })
+    ).json()) as { device_id: string; code: string };
+
+    const response = await remove(f, f.childId);
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as { devices_removed: number }).devices_removed).toBe(2);
+    expect(await statusOf(f.deviceId)).toBe("decommissioned");
+    expect(await statusOf(spare.device_id)).toBe("decommissioned");
+
+    // The set-up Mac's next check-in gets the one answer that uninstalls it.
+    const sync = await app.request("/api/agent/v1/sync", {
+      method: "POST",
+      headers: { "x-api-key": f.token, "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(sync.status).toBe(401);
+    expect(((await sync.json()) as { hpc_action?: string }).hpc_action).toBe("decommission");
+
+    // And the never-set-up one's code is dead.
+    const claim = await app.request("/api/agent/v1/enroll", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        code: spare.code,
+        hardware_uuid: "0F1E2D3C-4B5A-6978-8796-A5B4C3D2E1F0",
+      }),
+    });
+    expect(claim.status).toBe(404);
+  });
+
+  it("★ the child leaves every list, and the history stays", async () => {
+    const f = await seed();
+    expect((await remove(f, f.childId)).status).toBe(200);
+
+    const setup = (await (await get("/setup", f)).json()) as { children: { id: string }[] };
+    expect(setup.children.map((child) => child.id)).not.toContain(f.childId);
+    const rules = (await (await get("/rules", f)).json()) as { children: { id: string }[] };
+    expect(rules.children.map((child) => child.id)).not.toContain(f.childId);
+
+    // Archived, not deleted — and the device's policy history survives.
+    const [child] = await db
+      .select({ archivedAt: children.archivedAt })
+      .from(children)
+      .where(eq(children.id, f.childId));
+    expect(child?.archivedAt).toBeInstanceOf(Date);
+    const versions = await db
+      .select({ version: policyVersions.version })
+      .from(policyVersions)
+      .where(eq(policyVersions.deviceId, f.deviceId));
+    expect(versions.length).toBeGreaterThan(0);
+  });
+
+  it("a removed child cannot be given a device, or be removed twice", async () => {
+    const f = await seed();
+    await remove(f, f.childId);
+    const added = await send("/devices", f, "POST", { child_id: f.childId, label: "Another" });
+    expect(added.status).toBe(404);
+    expect((await remove(f, f.childId)).status).toBe(404);
+  });
+
+  it("★ the confirm word is checked on the server, and a wrong one changes nothing", async () => {
+    const f = await seed();
+    expect((await send(`/children/${f.childId}/remove`, f, "POST", {})).status).toBe(422);
+    expect((await remove(f, f.childId, "DECOMMISSION")).status).toBe(422);
+    expect(await statusOf(f.deviceId)).toBe("active");
+  });
+
+  it("★ a parent cannot remove another household's child", async () => {
+    const mine = await seed();
+    const otherHouseholdId = randomUUID();
+    const otherServiceId = randomUUID();
+    await db.insert(users).values({
+      id: otherServiceId,
+      name: "Other service",
+      email: `service+${otherHouseholdId}@hpc.local`,
+      isService: true,
+    });
+    await db
+      .insert(households)
+      .values({ id: otherHouseholdId, name: "Other", serviceUserId: otherServiceId });
+    const [other] = await db
+      .insert(children)
+      .values({ householdId: otherHouseholdId, displayName: "Sam" })
+      .returning({ id: children.id });
+
+    expect((await remove(mine, other?.id ?? "")).status).toBe(404);
+    const [still] = await db
+      .select({ archivedAt: children.archivedAt })
+      .from(children)
+      .where(eq(children.id, other?.id ?? ""));
+    expect(still?.archivedAt).toBeNull();
+  });
+});
+
 d("rules: diff, publish, restore", () => {
   beforeEach(wipe);
 

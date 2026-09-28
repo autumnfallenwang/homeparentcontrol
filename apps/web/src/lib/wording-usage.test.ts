@@ -69,6 +69,10 @@ const FORBIDDEN_LITERALS: { fragment: string; why: string }[] = [
     why: "§5.5's Remove consequence for a revoked device — import REMOVE_DEVICE",
   },
   {
+    fragment: "leaves this list",
+    why: "ADR 0011's Remove-a-child consequence — import REMOVE_CHILD",
+  },
+  {
     fragment: "not minutes it was switched on",
     why: "§5.8's active_s label — import ACTIVE_TIME_EXPLANATION",
   },
@@ -111,6 +115,9 @@ describe("the four load-bearing wordings", () => {
     expect(settings, "the Remove confirmation must exist to be checked").toBeDefined();
     const said = settings?.code.split("REMOVE_DEVICE.consequence(").length ?? 0;
     expect(said - 1, "the confirmation and the done banner both say it").toBe(2);
+    // And the same for removing a child.
+    const saidChild = settings?.code.split("REMOVE_CHILD.consequence(").length ?? 0;
+    expect(saidChild - 1, "the child confirmation and its done banner both say it").toBe(2);
 
     // ★ §6.5 — the card must actually render the shadow line, not merely
     // avoid hardcoding it.

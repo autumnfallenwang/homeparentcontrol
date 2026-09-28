@@ -1,6 +1,6 @@
 "use client";
 
-import { REMOVE_DEVICE } from "@hpc/contract";
+import { REMOVE_CHILD, REMOVE_DEVICE } from "@hpc/contract";
 import { Check, ChevronRight, Copy, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
@@ -14,6 +14,7 @@ import {
   getSetup,
   getToday,
   reissueCode,
+  removeChild,
   removeDevice,
 } from "../../lib/parent-api.js";
 import { stateLabel } from "../../lib/state-label.js";
@@ -50,9 +51,10 @@ import {
  * to be a banner at the top of the page — away from the device it belonged
  * to, and with nothing to copy it with.
  *
- * Remove is confirmed in place, the way homework removes a child: the row
- * turns into the question and what will happen. It replaced Revoke and
- * Decommission's typed-word forms (ADR 0011).
+ * Remove — a device or a whole child — is confirmed in place, the way
+ * homework removes a child: the row or card header turns into the question
+ * and what will happen. It replaced Revoke and Decommission's typed-word
+ * forms (ADR 0011).
  */
 
 type Setup = Awaited<ReturnType<typeof getSetup>>;
@@ -70,10 +72,10 @@ export function ChildrenAndDevices() {
   const [cards, setCards] = useState<DeviceCard[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [codes, setCodes] = useState<Record<string, FreshCode>>({});
-  // ⚠️ Page-level, not in the row: a removed device leaves the list on the
-  // very refresh that follows, taking any in-row "done" with it — seen on the
-  // first real decommission, which confirmed nothing on screen.
-  const [removed, setRemoved] = useState<{ device: string; status: string } | null>(null);
+  // ⚠️ Page-level, not in the row: a removed device or child leaves the list
+  // on the very refresh that follows, taking any in-row "done" with it — seen
+  // on the first real decommission, which confirmed nothing on screen.
+  const [removed, setRemoved] = useState<{ title: string; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -149,7 +151,10 @@ export function ChildrenAndDevices() {
       }
       onRemove={async () => {
         await removeDevice(device.id);
-        setRemoved({ device: device.label ?? "The device", status: device.status });
+        setRemoved({
+          title: `Removed ${device.label ?? "the device"}`,
+          text: REMOVE_DEVICE.consequence(device.status),
+        });
         await changed();
       }}
     />
@@ -160,8 +165,8 @@ export function ChildrenAndDevices() {
       {error ? <ErrorNote error={error} /> : null}
 
       {removed ? (
-        <Banner tone="ok" title={`Removed ${removed.device}`}>
-          {REMOVE_DEVICE.consequence(removed.status)}
+        <Banner tone="ok" title={removed.title}>
+          {removed.text}
         </Banner>
       ) : null}
 
@@ -171,25 +176,40 @@ export function ChildrenAndDevices() {
         </Banner>
       ) : null}
 
-      {setup.children.map((child) => (
-        <ChildCard
-          key={child.id}
-          name={child.displayName}
-          busy={busy}
-          onAddDevice={(label) =>
-            run(async () => {
-              const created = await createDevice({ child_id: child.id, label });
-              setCodes((current) => ({
-                ...current,
-                [created.device_id]: { code: created.code, expires_at: created.expires_at },
-              }));
+      {setup.children.map((child) => {
+        // Every status, removed ones included — the wording ignores those.
+        const statuses = setup.devices
+          .filter((device) => device.childId === child.id)
+          .map((device) => device.status);
+        return (
+          <ChildCard
+            key={child.id}
+            name={child.displayName}
+            deviceStatuses={statuses}
+            busy={busy}
+            onRemove={async () => {
+              await removeChild(child.id);
+              setRemoved({
+                title: `Removed ${child.displayName}`,
+                text: REMOVE_CHILD.consequence(child.displayName, statuses),
+              });
               await changed();
-            })
-          }
-        >
-          {live.filter((device) => device.childId === child.id).map(deviceRow)}
-        </ChildCard>
-      ))}
+            }}
+            onAddDevice={(label) =>
+              run(async () => {
+                const created = await createDevice({ child_id: child.id, label });
+                setCodes((current) => ({
+                  ...current,
+                  [created.device_id]: { code: created.code, expires_at: created.expires_at },
+                }));
+                await changed();
+              })
+            }
+          >
+            {live.filter((device) => device.childId === child.id).map(deviceRow)}
+          </ChildCard>
+        );
+      })}
 
       {unassigned.length > 0 ? (
         <Card>
@@ -220,31 +240,51 @@ export function ChildrenAndDevices() {
 
 function ChildCard({
   name,
+  deviceStatuses,
   busy,
   onAddDevice,
+  onRemove,
   children,
 }: {
   name: string;
+  deviceStatuses: string[];
   busy: boolean;
   onAddDevice: (label: string) => Promise<void>;
+  onRemove: () => Promise<void>;
   children: React.ReactNode[];
 }) {
   const [adding, setAdding] = useState(false);
   const [label, setLabel] = useState("");
+  const [confirming, setConfirming] = useState(false);
   return (
     <Card>
-      <div className="flex items-baseline justify-between gap-3">
-        <SectionTitle>{name}</SectionTitle>
-        <span className="text-[13px] text-muted-foreground">
-          {children.length === 1 ? "1 device" : `${children.length} devices`}
-        </span>
-      </div>
+      {confirming ? (
+        <ConfirmRemove
+          question={REMOVE_CHILD.question(name)}
+          consequence={REMOVE_CHILD.consequence(name, deviceStatuses)}
+          onRemove={onRemove}
+          onCancel={() => setConfirming(false)}
+        />
+      ) : (
+        <div className="flex items-center justify-between gap-3">
+          <SectionTitle>{name}</SectionTitle>
+          <span className="flex items-center gap-1">
+            <span className="text-[13px] text-muted-foreground">
+              {children.length === 1 ? "1 device" : `${children.length} devices`}
+            </span>
+            <Button variant="quiet" disabled={busy} onClick={() => setConfirming(true)}>
+              <Trash2 className="h-4 w-4" />
+              {REMOVE_CHILD.label}
+            </Button>
+          </span>
+        </div>
+      )}
       {children.length > 0 ? (
         <ul className="mt-2 divide-y divide-border">{children}</ul>
       ) : (
         <p className="mt-2 text-sm text-muted-foreground">No devices yet.</p>
       )}
-      <div className="mt-3">
+      <div className={confirming ? "hidden" : "mt-3"}>
         {adding ? (
           <div className="space-y-2 rounded-lg border border-border bg-secondary/40 p-3">
             <div className="flex flex-wrap items-end gap-2">
@@ -302,8 +342,6 @@ function DeviceRow({
   onRemove: () => Promise<void>;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const [removing, setRemoving] = useState(false);
-  const [error, setError] = useState<unknown>(null);
   const status = statusOf(device, card);
   const enrolled = device.status !== "pending";
   const name = device.label ?? "this device";
@@ -311,37 +349,12 @@ function DeviceRow({
   if (confirming) {
     return (
       <li className="py-3">
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="min-w-0 flex-1">
-              <p className="font-medium text-foreground">{REMOVE_DEVICE.question(name)}</p>
-              <p className="text-[13px] text-muted-foreground">
-                {REMOVE_DEVICE.consequence(device.status)}
-              </p>
-            </div>
-            <Button
-              variant="danger"
-              disabled={removing}
-              onClick={async () => {
-                setRemoving(true);
-                setError(null);
-                try {
-                  // The row leaves the list on the refresh that follows.
-                  await onRemove();
-                } catch (caught) {
-                  setError(caught);
-                  setRemoving(false);
-                }
-              }}
-            >
-              {removing ? "Removing…" : REMOVE_DEVICE.label}
-            </Button>
-            <Button variant="quiet" disabled={removing} onClick={() => setConfirming(false)}>
-              Cancel
-            </Button>
-          </div>
-          {error ? <ErrorNote error={error} /> : null}
-        </div>
+        <ConfirmRemove
+          question={REMOVE_DEVICE.question(name)}
+          consequence={REMOVE_DEVICE.consequence(device.status)}
+          onRemove={onRemove}
+          onCancel={() => setConfirming(false)}
+        />
       </li>
     );
   }
@@ -379,6 +392,57 @@ function DeviceRow({
         />
       )}
     </li>
+  );
+}
+
+/**
+ * ★ The in-place confirmation, for a device row and a child card alike —
+ * homework's pattern: the thing being removed turns into the question, one
+ * line saying what will happen, and Remove / Cancel.
+ */
+function ConfirmRemove({
+  question,
+  consequence,
+  onRemove,
+  onCancel,
+}: {
+  question: string;
+  consequence: string;
+  onRemove: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [removing, setRemoving] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  return (
+    <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-foreground">{question}</p>
+          <p className="text-[13px] text-muted-foreground">{consequence}</p>
+        </div>
+        <Button
+          variant="danger"
+          disabled={removing}
+          onClick={async () => {
+            setRemoving(true);
+            setError(null);
+            try {
+              // What was removed leaves the page on the refresh that follows.
+              await onRemove();
+            } catch (caught) {
+              setError(caught);
+              setRemoving(false);
+            }
+          }}
+        >
+          {removing ? "Removing…" : "Remove"}
+        </Button>
+        <Button variant="quiet" disabled={removing} onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+      {error ? <ErrorNote error={error} /> : null}
+    </div>
   );
 }
 

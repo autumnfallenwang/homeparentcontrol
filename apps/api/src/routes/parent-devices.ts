@@ -331,25 +331,66 @@ export async function handleRevoke(c: Context<{ Variables: ParentVariables }>) {
  * `agent.decommissioned` report arrives.
  */
 export async function handleDecommission(c: Context<{ Variables: ParentVariables }>) {
-  return endCredential(c, {
-    action: "decommission",
-    confirmWord: "DECOMMISSION",
-    status: "decommissioned",
-    dropDesired: true,
-    keepCredential: true,
-  });
+  return endCredential(c, { action: "decommission", confirmWord: "DECOMMISSION", ...DECOMMISSION });
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+interface EndOptions {
+  status: string;
+  dropDesired: boolean;
+  /** Decommission only: the device must still authenticate to be told. */
+  keepCredential?: boolean;
+}
+
+/** What Decommission does to a device — and so what removing its child does to each one. */
+export const DECOMMISSION: EndOptions = {
+  status: "decommissioned",
+  dropDesired: true,
+  keepCredential: true,
+};
+
+/**
+ * End one device, inside the caller's transaction. One function for both
+ * endpoints and for removing a child, so the three cannot drift apart.
+ */
+export async function endDevice(
+  tx: Tx,
+  device: { id: string; apiKeyId: string | null; previous: string | null },
+  opts: EndOptions,
+) {
+  if (!opts.keepCredential) {
+    // Both keys — the current one and any inside a rotation overlap.
+    for (const keyId of [device.apiKeyId, device.previous].filter(Boolean) as string[]) {
+      await tx.update(apikeys).set({ enabled: false }).where(eq(apikeys.id, keyId));
+    }
+  }
+  await tx
+    .update(devices)
+    .set({
+      status: opts.status,
+      // Kept while the credential lives: the agent may be mid-rotation.
+      ...(opts.keepCredential ? {} : { previousApiKeyId: null, previousApiKeyExpiresAt: null }),
+    })
+    .where(eq(devices.id, device.id));
+
+  // ★ And its unused setup code dies with it. The claim never looks at the
+  // device's status, so a removed device that was never set up came back as
+  // `enrolled` the moment anyone pasted its old install command.
+  await tx
+    .delete(enrollments)
+    .where(and(eq(enrollments.deviceId, device.id), isNull(enrollments.consumedAt)));
+
+  if (opts.dropDesired) {
+    // "every `desired_items` row dropped" — nothing should hand a retired
+    // device new work.
+    await tx.delete(desiredItems).where(eq(desiredItems.deviceId, device.id));
+  }
 }
 
 async function endCredential(
   c: Context<{ Variables: ParentVariables }>,
-  opts: {
-    action: "revoke" | "decommission";
-    confirmWord: string;
-    status: string;
-    dropDesired: boolean;
-    /** Decommission only: the device must still authenticate to be told. */
-    keepCredential?: boolean;
-  },
+  opts: EndOptions & { action: "revoke" | "decommission"; confirmWord: string },
 ) {
   const householdId = c.get("householdId");
   const user = c.get("user");
@@ -372,35 +413,7 @@ async function endCredential(
     .limit(1);
   if (!device) return fail(c, 404, "no such device");
 
-  await db.transaction(async (tx) => {
-    if (!opts.keepCredential) {
-      // Both keys — the current one and any inside a rotation overlap.
-      for (const keyId of [device.apiKeyId, device.previous].filter(Boolean) as string[]) {
-        await tx.update(apikeys).set({ enabled: false }).where(eq(apikeys.id, keyId));
-      }
-    }
-    await tx
-      .update(devices)
-      .set({
-        status: opts.status,
-        // Kept while the credential lives: the agent may be mid-rotation.
-        ...(opts.keepCredential ? {} : { previousApiKeyId: null, previousApiKeyExpiresAt: null }),
-      })
-      .where(eq(devices.id, device.id));
-
-    // ★ And its unused setup code dies with it. The claim never looks at the
-    // device's status, so a removed device that was never set up came back
-    // as `enrolled` the moment anyone pasted its old install command.
-    await tx
-      .delete(enrollments)
-      .where(and(eq(enrollments.deviceId, device.id), isNull(enrollments.consumedAt)));
-
-    if (opts.dropDesired) {
-      // "every `desired_items` row dropped" — nothing should hand a retired
-      // device new work.
-      await tx.delete(desiredItems).where(eq(desiredItems.deviceId, device.id));
-    }
-  });
+  await db.transaction((tx) => endDevice(tx, device, opts));
 
   log.warn(
     { event: `device.${opts.action}`, device_id: device.id, by: user.id },

@@ -32,6 +32,7 @@ import {
   handleListDevices,
   handlePatchSettings,
   handleReissueCode,
+  handleRemoveChild,
   handleSetupState,
 } from "./parent-setup.js";
 import { handleToday } from "./parent-today.js";
@@ -103,3 +104,4 @@ parentApp.get("/settings", handleGetSettings);
 parentApp.patch("/settings", handlePatchSettings);
 parentApp.get("/setup", handleSetupState);
 parentApp.post("/children", handleCreateChild);
+parentApp.post("/children/:id/remove", handleRemoveChild);
