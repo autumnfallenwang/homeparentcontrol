@@ -104,12 +104,15 @@ describe("the four load-bearing wordings", () => {
     const grant = files.find((file) => file.path.endsWith("grant-buttons.tsx"));
     expect(grant?.text).toContain("LATE_GRANT_DOES_NOT_UNLOCK");
 
-    // The Mac's OWN page — exact, because `/devices` is also a list page now,
-    // and "the first path containing devices" was a directory-order accident.
-    const device = files.find((file) => file.path.endsWith("devices/[id]/page.tsx"));
-    expect(device, "the Mac page must exist to be checked").toBeDefined();
-    expect(device?.text).toContain("REVOKE");
-    expect(device?.text).toContain("DECOMMISSION");
+    // Where Revoke and Decommission are offered — Settings › Children &
+    // devices, since they left the Mac's own page. Exact path: a guard that
+    // finds "the first file mentioning devices" checks whatever sorts first.
+    const danger = files.find((file) => file.path.endsWith("components/device-danger-zone.tsx"));
+    expect(danger, "the Revoke/Decommission component must exist to be checked").toBeDefined();
+    expect(danger?.code).toContain("REVOKE");
+    expect(danger?.code).toContain("DECOMMISSION");
+    const settings = files.find((file) => file.path.endsWith("settings/children-devices.tsx"));
+    expect(settings?.code, "and Settings must actually render it").toContain("<DeviceDangerZone");
 
     // ★ §6.5 — the card must actually render the shadow line, not merely
     // avoid hardcoding it.

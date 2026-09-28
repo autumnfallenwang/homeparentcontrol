@@ -1,27 +1,13 @@
 "use client";
 
-import { DECOMMISSION, type DestructiveAction, healthPhrasing, REVOKE } from "@hpc/contract";
+import { healthPhrasing } from "@hpc/contract";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { Page } from "../../../../components/shell/page.js";
-import {
-  Banner,
-  Button,
-  Card,
-  ErrorNote,
-  Field,
-  inputClass,
-  Spinner,
-} from "../../../../components/ui.js";
+import { Button, Card, ErrorNote, Field, inputClass, Spinner } from "../../../../components/ui.js";
 import { dayAndTime, humanDuration, weekdayOf } from "../../../../lib/format.js";
-import {
-  attendDevice,
-  type DeviceDetail,
-  decommissionDevice,
-  getDevice,
-  revokeDevice,
-  setAway,
-} from "../../../../lib/parent-api.js";
+import { attendDevice, type DeviceDetail, getDevice, setAway } from "../../../../lib/parent-api.js";
 import { stateLabel } from "../../../../lib/state-label.js";
 
 /**
@@ -30,6 +16,10 @@ import { stateLabel } from "../../../../lib/state-label.js";
  * §5.8: "**opening it sets `attendedUntil = now() + 10 min`**, which is the
  * whole mechanism behind the 5-second grant; 7-day state timeline; clock
  * posture; **Away until…**; Revoke / Re-enrol / Decommission".
+ *
+ * Reached from the device's card on Today. Revoke, re-enrol and decommission
+ * live in Settings › Children & devices with the rest of managing the
+ * household; this page links there.
  */
 
 const POLL_MS = 5_000;
@@ -82,13 +72,13 @@ export default function DevicePage() {
 
   if (error && !detail)
     return (
-      <Page title="Mac" back={{ href: "/devices", label: "Macs" }}>
+      <Page title="Mac" back={{ href: "/", label: "Today" }}>
         <ErrorNote error={error} />
       </Page>
     );
   if (!detail)
     return (
-      <Page title="Mac" back={{ href: "/devices", label: "Macs" }}>
+      <Page title="Mac" back={{ href: "/", label: "Today" }}>
         <Spinner />
       </Page>
     );
@@ -108,7 +98,7 @@ export default function DevicePage() {
   return (
     <Page
       title={detail.device.label ?? "Unnamed Mac"}
-      back={{ href: "/devices", label: "Macs" }}
+      back={{ href: "/", label: "Today" }}
       subtitle={`${detail.device.child?.display_name ?? "No child"} · ${detail.device.agent_version ?? "no agent yet"}`}
     >
       {error ? (
@@ -153,7 +143,13 @@ export default function DevicePage() {
         <TimelineCard detail={detail} />
         <EnforcementCard detail={detail} />
         <TripwiresCard detail={detail} />
-        <DangerCard detail={detail} onChanged={refresh} />
+        <p className="text-sm text-muted-foreground">
+          To revoke or decommission this Mac, go to{" "}
+          <Link href="/settings/children" className="underline">
+            Settings › Children &amp; devices
+          </Link>
+          .
+        </p>
       </div>
     </Page>
   );
@@ -294,99 +290,5 @@ function TripwiresCard({ detail }: { detail: DeviceDetail }) {
         ))}
       </ul>
     </Card>
-  );
-}
-
-/**
- * ★ Revoke and Decommission (§5.5).
- *
- * ⚠️ "The UI must make these typed-confirmation actions and must say what
- * each does, because they look similar and behave oppositely." Both the
- * description and the confirm word come from `@hpc/contract`, and the server
- * checks the word again — a confirmation only the browser enforces is one
- * anyone can skip.
- */
-function DangerCard({ detail, onChanged }: { detail: DeviceDetail; onChanged: () => void }) {
-  return (
-    <Card tone="alarm">
-      <h2 className="font-heading text-lg font-medium tracking-tight text-destructive">
-        Ending this Mac’s enrolment
-      </h2>
-      <div className="mt-3 space-y-4">
-        <DestructiveRow
-          action={REVOKE}
-          deviceId={detail.device.id}
-          run={revokeDevice}
-          onChanged={onChanged}
-        />
-        <DestructiveRow
-          action={DECOMMISSION}
-          deviceId={detail.device.id}
-          run={decommissionDevice}
-          onChanged={onChanged}
-        />
-      </div>
-    </Card>
-  );
-}
-
-function DestructiveRow({
-  action,
-  deviceId,
-  run,
-  onChanged,
-}: {
-  action: DestructiveAction;
-  deviceId: string;
-  run: (id: string, confirm: string) => Promise<unknown>;
-  onChanged: () => void;
-}) {
-  const [typed, setTyped] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
-
-  return (
-    <div className="rounded-lg border border-destructive/30 bg-card p-3">
-      <p className="font-medium text-foreground">{action.label}</p>
-      {/* ★ What it actually does, in the spec's own words — and the two say
-          opposite things about enforcement. */}
-      <p className="mt-1 text-sm text-foreground/85">{action.description}</p>
-      <p className="text-sm text-muted-foreground">{action.useWhen}</p>
-      {done ? (
-        <Banner tone="ok" title={`${action.label} done`}>
-          {action.stopsEnforcement
-            ? "This Mac will stop enforcing on its next check-in."
-            : "This Mac keeps enforcing the rules it already has."}
-        </Banner>
-      ) : (
-        <div className="mt-2 flex flex-wrap items-end gap-2">
-          <Field label={`Type ${action.confirmWord} to confirm`}>
-            <input
-              className={inputClass}
-              value={typed}
-              onChange={(event) => setTyped(event.target.value)}
-              placeholder={action.confirmWord}
-              autoComplete="off"
-            />
-          </Field>
-          <Button
-            variant="danger"
-            disabled={typed !== action.confirmWord || busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await run(deviceId, typed);
-                setDone(true);
-                onChanged();
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            {action.label}
-          </Button>
-        </div>
-      )}
-    </div>
   );
 }

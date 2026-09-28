@@ -60,9 +60,9 @@ export function Banner({
 
 const BADGE: Record<Tone, string> = {
   plain: "bg-secondary text-secondary-foreground",
-  ok: "bg-ok/15 text-[oklch(0.42_0.11_145)]",
+  ok: "bg-ok/15 text-ok-text",
   info: "bg-info/12 text-info",
-  warn: "bg-attention/20 text-attention-foreground",
+  warn: "bg-attention/20 text-attention-text",
   alarm: "bg-destructive/12 text-destructive",
 };
 

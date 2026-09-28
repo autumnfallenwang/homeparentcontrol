@@ -6,11 +6,18 @@ import {
   NO_DATA_FOR_PERIOD,
   ZERO_USAGE_FOR_PERIOD,
 } from "@hpc/contract";
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Page } from "../../../components/shell/page.js";
-import { Card, ErrorNote, NoData, Spinner } from "../../../components/ui.js";
+import { Page, SectionTitle } from "../../../components/shell/page.js";
+import { useViewing } from "../../../components/shell/viewing.js";
+import { Banner, Card, ErrorNote, NoData, Spinner } from "../../../components/ui.js";
 import { appName, dayAndTime, humanMinutes } from "../../../lib/format.js";
-import { getReports, type ReportPayload } from "../../../lib/parent-api.js";
+import {
+  getReports,
+  getSettings,
+  patchSettings,
+  type ReportPayload,
+} from "../../../lib/parent-api.js";
 
 /**
  * `/reports` — D.2's **dashboard** sink.
@@ -22,20 +29,31 @@ import { getReports, type ReportPayload } from "../../../lib/parent-api.js";
  * ★ §5.7's first honesty rule is the whole visual design here: "**zero usage
  * and no data look identical on a bar chart and mean opposite things**". A
  * bucket nobody reported is hatched and labelled, never drawn as a zero.
+ *
+ * About the child picked in the Viewing switch — and it carries that child's
+ * "Collect usage data" switch, the one thing that decides whether this page
+ * fills in at all.
  */
 export default function ReportsPage() {
+  const viewing = useViewing();
+  const childId = viewing.child?.id ?? null;
   const [grain, setGrain] = useState<"day" | "hour">("day");
   const [payload, setPayload] = useState<ReportPayload | null>(null);
   const [error, setError] = useState<unknown>(null);
 
   const load = useCallback(async () => {
+    // ⚠️ Never unscoped. Without a child the API would answer for the whole
+    // household, and this page would show one child's name over everyone's
+    // minutes.
+    if (!childId) return;
     try {
-      setPayload(await getReports({ grain }));
+      setPayload(null);
+      setPayload(await getReports({ grain, child_id: childId }));
       setError(null);
     } catch (caught) {
       setError(caught);
     }
-  }, [grain]);
+  }, [grain, childId]);
 
   useEffect(() => {
     void load();
@@ -66,7 +84,16 @@ export default function ReportsPage() {
       }
     >
       {error ? <ErrorNote error={error} /> : null}
-      {!payload && !error ? <Spinner /> : null}
+      {viewing.children !== null && !viewing.child ? (
+        <Banner tone="info" title="No children yet">
+          Add one in{" "}
+          <Link href="/settings/children" className="underline">
+            Settings › Children &amp; devices
+          </Link>
+          .
+        </Banner>
+      ) : null}
+      {viewing.child && !payload && !error ? <Spinner /> : null}
 
       {payload ? (
         <div className="space-y-4">
@@ -84,7 +111,7 @@ export default function ReportsPage() {
               {humanMinutes(payload.totals.activeS)}
             </p>
             {payload.totals.gapBuckets > 0 ? (
-              <p className="mt-2 text-sm text-attention-foreground">
+              <p className="mt-2 text-sm text-attention-text">
                 {payload.totals.gapBuckets} of {payload.buckets.length} periods have no data — the
                 Mac wasn’t reporting then, so this total is a floor, not the whole picture.
               </p>
@@ -139,7 +166,7 @@ export default function ReportsPage() {
                           className="h-full w-full"
                           style={{
                             backgroundImage:
-                              "repeating-linear-gradient(45deg, #cbd5e1 0 4px, transparent 4px 8px)",
+                              "repeating-linear-gradient(45deg, color-mix(in oklch, var(--muted-foreground) 40%, transparent) 0 4px, transparent 4px 8px)",
                           }}
                           title={NO_DATA_FOR_PERIOD}
                         />
@@ -183,6 +210,79 @@ export default function ReportsPage() {
           </Card>
         </div>
       ) : null}
+
+      {childId ? <UsageSwitch key={childId} childId={childId} /> : null}
     </Page>
+  );
+}
+
+/**
+ * "Collect usage data" — moved here from Settings: it is one child's, and it
+ * is the switch that decides whether this page fills in.
+ *
+ * ⚠️ Like the extra-time caps, it is part of the compiled policy, so it
+ * reaches the Mac with the next publish — the page says so and links there,
+ * rather than announcing "Saved" as if the Mac already knew.
+ */
+function UsageSwitch({ childId }: { childId: string }) {
+  const [setId, setSetId] = useState<string | null>(null);
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [changed, setChanged] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const settings = await getSettings();
+        const set = settings.policy_sets.find((candidate) => candidate.childId === childId);
+        setSetId(set?.id ?? null);
+        setEnabled(set?.telemetryEnabled ?? null);
+      } catch (caught) {
+        setError(caught);
+      }
+    })();
+  }, [childId]);
+
+  if (error) return <ErrorNote error={error} />;
+  if (enabled === null || !setId) return null;
+
+  return (
+    <Card>
+      <SectionTitle>Usage data</SectionTitle>
+      <label className="mt-3 flex min-h-11 items-center gap-3 text-sm">
+        <input
+          type="checkbox"
+          className="size-5 accent-primary"
+          checked={enabled}
+          onChange={async (event) => {
+            const next = event.target.checked;
+            setEnabled(next);
+            try {
+              await patchSettings({ policy_set_id: setId, telemetry_enabled: next });
+              setChanged(true);
+            } catch (caught) {
+              setEnabled(!next);
+              setError(caught);
+            }
+          }}
+        />
+        <span className="text-foreground">Collect usage data</span>
+      </label>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Turning this off stops this page filling in. It does not change bedtime — the rules are
+        enforced either way.
+      </p>
+      {changed ? (
+        <div className="mt-3">
+          <Banner tone="info" title="Saved — not on the Mac yet">
+            It reaches the Mac when you next publish.{" "}
+            <Link href="/rules" className="underline">
+              Review and publish in Rules
+            </Link>
+            .
+          </Banner>
+        </div>
+      ) : null}
+    </Card>
   );
 }

@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { GrantButtons, type PendingGrant } from "../../../components/grant-buttons.js";
 import { Page } from "../../../components/shell/page.js";
+import { useViewing } from "../../../components/shell/viewing.js";
 import { Button, Card, ErrorNote, Spinner } from "../../../components/ui.js";
 import { dayAndTime } from "../../../lib/format.js";
 import {
@@ -19,23 +20,29 @@ import {
  * new `policy_version` and a shifted `next_boundary_at` — **never by the
  * server's own write.** Claiming success on the write is the *'the server
  * thinks it delivered'* failure mode that polling was chosen to avoid."
+ *
+ * The child picked in the Viewing switch: their devices, and the grants
+ * made on them.
  */
 export default function OverridePage() {
-  const [cards, setCards] = useState<DeviceCard[] | null>(null);
-  const [history, setHistory] = useState<Awaited<ReturnType<typeof listOverrides>> | null>(null);
+  const viewing = useViewing();
+  const [allCards, setCards] = useState<DeviceCard[] | null>(null);
+  const [allHistory, setHistory] = useState<Awaited<ReturnType<typeof listOverrides>> | null>(null);
   const [pending, setPending] = useState<Record<string, PendingGrant>>({});
   const [error, setError] = useState<unknown>(null);
 
+  const { noteToday } = viewing;
   const refresh = useCallback(async () => {
     try {
       const [today, overrides] = await Promise.all([getToday(), listOverrides()]);
       setCards(today.devices);
+      noteToday(today.devices);
       setHistory(overrides);
       setError(null);
     } catch (caught) {
       setError(caught);
     }
-  }, []);
+  }, [noteToday]);
 
   useEffect(() => {
     void refresh();
@@ -43,8 +50,27 @@ export default function OverridePage() {
     return () => clearInterval(interval);
   }, [refresh, pending]);
 
+  const childId = viewing.child?.id ?? null;
+  const cards = useMemo(
+    () => allCards?.filter((card) => card.child?.id === childId) ?? null,
+    [allCards, childId],
+  );
+  // A grant names a device, not a child — so it is this child's when the
+  // device is. A grant for a device since moved to another child follows it.
+  const history = useMemo(() => {
+    if (!allHistory) return null;
+    const mine = new Set(
+      viewing.devices.filter((device) => device.childId === childId).map((device) => device.id),
+    );
+    return allHistory.overrides.filter((row) => row.device_id && mine.has(row.device_id));
+  }, [allHistory, viewing.devices, childId]);
+
   return (
-    <Page title="Extra time" back={{ href: "/", label: "Today" }}>
+    <Page
+      title="Extra time"
+      subtitle={viewing.child?.displayName}
+      back={{ href: "/", label: "Today" }}
+    >
       {error ? (
         <div className="mb-4">
           <ErrorNote error={error} />
@@ -75,11 +101,11 @@ export default function OverridePage() {
         {history ? (
           <Card>
             <h2 className="font-heading text-lg font-medium tracking-tight">Recent grants</h2>
-            {history.overrides.length === 0 ? (
+            {history.length === 0 ? (
               <p className="mt-2 text-sm text-muted-foreground">None yet.</p>
             ) : (
               <ul className="mt-3 space-y-2 text-sm">
-                {history.overrides.map((row) => (
+                {history.map((row) => (
                   <li key={row.id} className="flex flex-wrap items-center gap-3">
                     <span className="w-40 shrink-0 text-muted-foreground">
                       {dayAndTime(row.created_at)}

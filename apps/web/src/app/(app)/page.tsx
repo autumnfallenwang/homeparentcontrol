@@ -7,10 +7,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { GrantButtons, type PendingGrant } from "../../components/grant-buttons.js";
 import { cardPhrasing, cardSubject, HealthCard } from "../../components/health-card.js";
 import { Page } from "../../components/shell/page.js";
+import { useViewing } from "../../components/shell/viewing.js";
 import { Banner, ErrorNote, Spinner, type Tone } from "../../components/ui.js";
 import { humanMinutes } from "../../lib/format.js";
 import { settlePending } from "../../lib/grant-progress.js";
 import { type DeviceCard, getToday } from "../../lib/parent-api.js";
+import { needsAttention } from "../../lib/selected-child.js";
 
 /**
  * `/` — Today.
@@ -20,8 +22,10 @@ import { type DeviceCard, getToday } from "../../lib/parent-api.js";
  * eight, and the 15/30/60 grant buttons right here because this is the page
  * open when the child asks".
  *
- * Above the cards, in homework's shape: a one-line summary per child, then
- * "Needs you" — shown only when something does.
+ * About ONE child — the one picked in the sidebar's Viewing switch. Above
+ * the cards, in homework's shape: a one-line summary, then "Needs you" —
+ * shown only when something does. Another child's trouble is marked in the
+ * switch itself, so scoping this page never hides it.
  */
 
 /**
@@ -37,21 +41,24 @@ const IDLE_POLL_MS = 30_000;
 const WATCHING_POLL_MS = 5_000;
 
 export default function TodayPage() {
-  const [cards, setCards] = useState<DeviceCard[] | null>(null);
+  const viewing = useViewing();
+  const [allCards, setCards] = useState<DeviceCard[] | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [pending, setPending] = useState<Record<string, PendingGrant>>({});
 
+  const { noteToday } = viewing;
   const refresh = useCallback(async () => {
     try {
       const body = await getToday();
       setCards(body.devices);
+      noteToday(body.devices);
       setGeneratedAt(body.generated_at);
       setError(null);
     } catch (caught) {
       setError(caught);
     }
-  }, []);
+  }, [noteToday]);
 
   const watching = Object.keys(pending).length > 0;
 
@@ -63,12 +70,20 @@ export default function TodayPage() {
 
   // Keep "Applied ✓" on screen for a while once the Mac confirms, then let
   // the page settle instead of polling at 5 s for ever. See `settlePending`.
+  // Over EVERY device, not just this child's: a grant still in flight when
+  // the parent switches child must not keep the page on the fast poll.
   useEffect(() => {
-    if (!cards) return;
-    setPending((current) => settlePending(current, cards, Date.now()));
-  }, [cards]);
+    if (!allCards) return;
+    setPending((current) => settlePending(current, allCards, Date.now()));
+  }, [allCards]);
 
+  const childId = viewing.child?.id ?? null;
+  const cards = useMemo(
+    () => allCards?.filter((card) => card.child?.id === childId) ?? null,
+    [allCards, childId],
+  );
   const attention = useMemo(() => needsYou(cards ?? []), [cards]);
+  const ready = cards !== null && viewing.children !== null;
 
   return (
     <Page
@@ -90,14 +105,25 @@ export default function TodayPage() {
       }
     >
       {error ? <ErrorNote error={error} /> : null}
-      {cards === null && !error ? <Spinner /> : null}
+      {!ready && !error ? <Spinner /> : null}
 
-      {cards !== null && cards.length === 0 ? (
-        <Banner tone="info" title="No Macs yet">
-          <Link href="/setup" className="underline">
-            Add one
-          </Link>{" "}
-          to start.
+      {ready && !viewing.child ? (
+        <Banner tone="info" title="No children yet">
+          Add a child and their device in{" "}
+          <Link href="/settings/children" className="underline">
+            Settings › Children &amp; devices
+          </Link>
+          .
+        </Banner>
+      ) : null}
+
+      {ready && viewing.child && cards.length === 0 ? (
+        <Banner tone="info" title={`No devices for ${viewing.child.displayName} yet`}>
+          Add one in{" "}
+          <Link href="/settings/children" className="underline">
+            Settings › Children &amp; devices
+          </Link>
+          .
         </Banner>
       ) : null}
 
@@ -140,7 +166,9 @@ export default function TodayPage() {
 }
 
 /**
- * One row per child — homework's status hero.
+ * One row per child — homework's status hero. With the page scoped to one
+ * child that is one row, but the grouping stays: a device with no child
+ * still lands somewhere sensible.
  *
  * ⚠️ Says only "all clear" or how many Macs need you. It never restates
  * whether a Mac is enforcing: those sentences belong to `healthPhrasing` and
@@ -199,10 +227,6 @@ function ChildSummary({ cards }: { cards: DeviceCard[] }) {
   );
 }
 
-function needsAttention(card: DeviceCard): boolean {
-  return card.shadow_mode || card.health.state !== "HEALTHY" || card.banner !== null;
-}
-
 interface AttentionItem {
   key: string;
   href: string;
@@ -233,7 +257,7 @@ function needsYou(cards: DeviceCard[]): AttentionItem[] {
       items.push({
         key: `${card.device_id}:health`,
         // A Mac that never enrolled is fixed where codes are issued.
-        href: card.health.state === "UNENROLLED" ? "/setup" : href,
+        href: card.health.state === "UNENROLLED" ? "/settings/children" : href,
         tone: phrasing.tone as Tone,
         title: phrasing.headline,
         detail: phrasing.reassurance ?? undefined,

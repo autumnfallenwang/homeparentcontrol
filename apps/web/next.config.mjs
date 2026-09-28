@@ -4,6 +4,16 @@ const nextConfig = {
   outputFileTracingRoot: "../../",
   // Compile the shared workspace package (it ships TS source, no build step).
   transpilePackages: ["@hpc/contract"],
+  // The old pages moved into Settings › Children & devices; bookmarks and the
+  // installer instructions still point at them. Temporary (307), so the paths
+  // stay free to mean something else later.
+  async redirects() {
+    return [
+      { source: "/settings", destination: "/settings/children", permanent: false },
+      { source: "/devices", destination: "/settings/children", permanent: false },
+      { source: "/setup", destination: "/settings/children", permanent: false },
+    ];
+  },
   webpack: (config) => {
     // Resolve `.js` specifiers to their `.ts`/`.tsx` source. The contract package
     // uses NodeNext-style `.js` import extensions; webpack needs this alias to

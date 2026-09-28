@@ -88,7 +88,7 @@ version cannot lie about the variant.
 
 ## 3. Add the child and the Mac — 2 min 🧑
 
-**`/setup`** → add a child (name, timezone `America/New_York`) → add a Mac
+**Settings › Children & devices** (`/settings/children`) → add a child (name, timezone `America/New_York`) → add a device
 (pick the child, label it e.g. *Lucy's Mac mini*) → **Add it and get a
 code**.
 
@@ -133,7 +133,7 @@ sudo cat /var/db/homeparentcontrol/sync.health
 |---|---|
 | `no_base_url` | `--base-url` was missing or not http(s) |
 | `awaiting_enrolment_code` | no code staged — `printf 'HPC-…' \| sudo tee /var/db/homeparentcontrol/enrolment_code` |
-| `enrol_rejected:410` | the code **expired**. Make a new one in `/setup` and stage it. The dead code was moved to `enrolment_code.rejected` and is never retried |
+| `enrol_rejected:410` | the code **expired**. Make a new one in Settings › Children & devices (**New code**) and stage it. The dead code was moved to `enrolment_code.rejected` and is never retried |
 | `enrol_rejected:409` / `:404` | already used / mistyped. Same fix |
 | `enrol_failed:429` | the `/enroll` limiter (5/min, 20/hour for the household). Waits as told |
 | `enrol_failed:unreachable` | DNS or network — `dig +short homeparentcontrol-api.arch.internal` |
@@ -163,7 +163,7 @@ because it bites within 15 minutes; that is correct, confirm it.
 
 The page says which Mac it publishes to. ⚠️ If you have a leftover `pending`
 device from an expired code, it is skipped: the first run's page published to
-it — 200, nothing reached anything. Delete stale ones in `/setup` anyway.
+it — 200, nothing reached anything. Delete stale ones in Settings › Children & devices anyway.
 
 **Verify:** within a minute the tick reports `policy: "sent"`, and
 `enforcer.health` (next step) shows the new version.

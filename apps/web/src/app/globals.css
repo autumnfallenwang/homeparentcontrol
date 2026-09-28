@@ -8,10 +8,34 @@
  * self-hosted by next/font in layout.tsx, never fetched from Google at view
  * time.
  *
- * ⚠️ Light only, for now. homework also ships a `.dark` palette, but pages
- * here still carry some literal colours, and a dark background under them
- * would be unreadable. Dark mode arrives with the Appearance settings.
+ * Dark mode is homework's `.dark` palette, switched by a class on <html>
+ * (Settings › Appearance). ⚠️ Pages must use the tokens, never a literal
+ * colour: a `#cbd5e1` hatch or an `oklch(…)` badge text looks right in light
+ * and disappears in dark.
  */
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Settings › Appearance › Size scales the whole page with `zoom`, as homework
+ * does — so `text-[13px]`, icons and spacing grow together, not just rem
+ * text. ⚠️ Viewport units do not follow `zoom`, so anything sized to the
+ * viewport uses the utilities below instead of `h-dvh` / `min-h-dvh`.
+ */
+html {
+  zoom: var(--font-scale, 1);
+  color-scheme: light;
+}
+html.dark {
+  color-scheme: dark;
+}
+
+@utility h-viewport {
+  height: calc(100dvh / var(--font-scale, 1));
+}
+@utility min-h-viewport {
+  min-height: calc(100dvh / var(--font-scale, 1));
+}
 
 @theme inline {
   --color-background: var(--background);
@@ -35,8 +59,10 @@
 
   --color-ok: var(--ok);
   --color-ok-foreground: var(--ok-foreground);
+  --color-ok-text: var(--ok-text);
   --color-attention: var(--attention);
   --color-attention-foreground: var(--attention-foreground);
+  --color-attention-text: var(--attention-text);
   --color-info: var(--info);
 
   --radius-sm: calc(var(--radius) - 4px);
@@ -74,6 +100,39 @@
   --attention: oklch(0.72 0.15 65);
   --attention-foreground: oklch(0.22 0.04 65);
   --info: oklch(0.55 0.12 240);
+  /* Status text on a tinted surface — must read on BOTH palettes, which
+     `*-foreground` (text on a solid fill) does not. */
+  --ok-text: oklch(0.42 0.11 145);
+  --attention-text: oklch(0.45 0.1 60);
+}
+
+.dark {
+  --background: oklch(0.22 0.012 60);
+  --foreground: oklch(0.9 0.012 75);
+  --card: oklch(0.25 0.014 60);
+  --card-foreground: oklch(0.9 0.012 75);
+  --primary: oklch(0.7 0.105 165);
+  --primary-foreground: oklch(0.2 0.02 165);
+  --secondary: oklch(0.28 0.012 60);
+  --secondary-foreground: oklch(0.88 0.012 75);
+  --muted: oklch(0.28 0.014 60);
+  --muted-foreground: oklch(0.68 0.014 75);
+  --accent: oklch(0.3 0.016 60);
+  --accent-foreground: oklch(0.9 0.012 75);
+  --destructive: oklch(0.68 0.16 25);
+  --destructive-foreground: oklch(0.15 0.03 25);
+  --border: oklch(0.34 0.014 60);
+  --input: oklch(0.3 0.014 60);
+  --ring: oklch(0.7 0.1 165);
+  --sidebar: oklch(0.2 0.012 60);
+
+  --ok: oklch(0.7 0.14 145);
+  --ok-foreground: oklch(0.18 0.03 145);
+  --attention: oklch(0.8 0.15 65);
+  --attention-foreground: oklch(0.2 0.04 65);
+  --info: oklch(0.72 0.11 240);
+  --ok-text: oklch(0.82 0.12 145);
+  --attention-text: oklch(0.85 0.12 70);
 }
 
 body {

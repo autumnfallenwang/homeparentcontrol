@@ -3,6 +3,7 @@ import {
   compiledWindows,
   describeDays,
   neverShutsDown,
+  settingChanges,
   summarise,
   windowMinutes,
 } from "./rule-summary.js";
@@ -86,5 +87,37 @@ describe("compiledWindows", () => {
   it("returns null rather than throwing on a document it cannot read", () => {
     expect(compiledWindows(null)).toBeNull();
     expect(compiledWindows({ schedule: "?" })).toBeNull();
+  });
+});
+
+describe("settingChanges — what else a publish sends", () => {
+  const doc = (minutes: number, grants: number, usage: boolean) => ({
+    override_policy: { max_minutes_per_day: minutes, max_grants_per_day: grants },
+    telemetry: { enabled: usage },
+  });
+
+  it("★ names a caps-only change, so the review is never an empty 'Publish'", () => {
+    expect(settingChanges(doc(60, 3, true), doc(90, 3, true))).toEqual([
+      "Extra time: up to 60 → 90 min a day",
+    ]);
+  });
+
+  it("names the grants cap and the usage switch", () => {
+    expect(settingChanges(doc(60, 3, true), doc(60, 2, false))).toEqual([
+      "Grants a day: 3 → 2",
+      "Usage data: on → off",
+    ]);
+  });
+
+  it("is empty when only the windows changed", () => {
+    expect(settingChanges(doc(60, 3, true), doc(60, 3, true))).toEqual([]);
+  });
+
+  it("treats a Mac with nothing published yet as 'not set'", () => {
+    expect(settingChanges(null, doc(60, 3, true))).toEqual([
+      "Extra time: up to — → 60 min a day",
+      "Grants a day: — → 3",
+      "Usage data: not set → on",
+    ]);
   });
 });

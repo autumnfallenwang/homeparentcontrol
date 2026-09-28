@@ -89,3 +89,40 @@ export function compiledWindows(document: unknown): WindowLike[] | null {
     };
   });
 }
+
+/**
+ * What else a publish changes, beyond the bedtime windows.
+ *
+ * ⚠️ The extra-time caps and the usage switch are compiled INTO the policy
+ * document, so saving them changes nothing on the Mac until the next publish.
+ * The old Settings page said "Saved" and stopped there; the Mac kept the old
+ * caps. Now they are part of this review — and without these lines the panel
+ * would ask the parent to publish while showing nothing different.
+ */
+export function settingChanges(current: unknown, proposed: unknown): string[] {
+  const read = (document: unknown) => {
+    const doc = (document ?? {}) as {
+      override_policy?: { max_minutes_per_day?: unknown; max_grants_per_day?: unknown };
+      telemetry?: { enabled?: unknown };
+    };
+    return {
+      minutes: doc.override_policy?.max_minutes_per_day,
+      grants: doc.override_policy?.max_grants_per_day,
+      usage: doc.telemetry?.enabled,
+    };
+  };
+  const before = read(current);
+  const after = read(proposed);
+  const onOff = (value: unknown) => (value === true ? "on" : value === false ? "off" : "not set");
+  const lines: string[] = [];
+  if (after.minutes !== before.minutes) {
+    lines.push(`Extra time: up to ${before.minutes ?? "—"} → ${after.minutes ?? "—"} min a day`);
+  }
+  if (after.grants !== before.grants) {
+    lines.push(`Grants a day: ${before.grants ?? "—"} → ${after.grants ?? "—"}`);
+  }
+  if (after.usage !== before.usage) {
+    lines.push(`Usage data: ${onOff(before.usage)} → ${onOff(after.usage)}`);
+  }
+  return lines;
+}

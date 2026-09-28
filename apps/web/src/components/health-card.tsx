@@ -6,6 +6,7 @@ import {
   healthPhrasing,
   shadowModeNotEnforcing,
 } from "@hpc/contract";
+import { ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { appName, humanDuration, humanMinutes, weekdayOf } from "../lib/format.js";
 import type { DeviceCard } from "../lib/parent-api.js";
@@ -55,9 +56,14 @@ export function HealthCard({ card, children }: { card: DeviceCard; children?: Re
             {card.label ?? "Unnamed Mac"}
           </Link>
         </h2>
-        {card.child?.display_name ? (
-          <span className="text-sm text-muted-foreground">{card.child.display_name}</span>
-        ) : null}
+        {/* The child's name is the page's own context now (Viewing), so the
+            corner carries the way into this device's page instead. */}
+        <Link
+          href={`/devices/${card.device_id}`}
+          className="inline-flex items-center gap-0.5 text-sm text-muted-foreground hover:text-foreground"
+        >
+          Details <ChevronRight className="h-4 w-4" />
+        </Link>
       </header>
 
       {/*

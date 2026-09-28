@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { DM_Sans, Newsreader } from "next/font/google";
+import { APPEARANCE_BOOT_SCRIPT } from "../lib/theme.js";
 import "./globals.css";
 
 /**
@@ -39,8 +40,24 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${newsreader.variable} ${dmSans.variable}`}>
-      <body className="min-h-dvh bg-background text-foreground antialiased">{children}</body>
+    // `suppressHydrationWarning`: the boot script adds `dark` and the size
+    // before React hydrates, so <html>'s attributes differ from the server's
+    // on purpose. It covers this one element, not the tree.
+    <html
+      lang="en"
+      className={`${newsreader.variable} ${dmSans.variable}`}
+      suppressHydrationWarning
+    >
+      <head>
+        {/* ⚠️ A plain inline script, not next/script: `beforeInteractive`
+            inline scripts in the App Router wait for Next's runtime, which
+            is after the first paint — a white flash on a dark tablet at
+            night. The content is a constant from lib/theme.ts; nothing a
+            user typed reaches it. */}
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: constant boot script, no user input */}
+        <script dangerouslySetInnerHTML={{ __html: APPEARANCE_BOOT_SCRIPT }} />
+      </head>
+      <body className="min-h-viewport bg-background text-foreground antialiased">{children}</body>
     </html>
   );
 }

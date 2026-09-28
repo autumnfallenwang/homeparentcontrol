@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, Pencil, Plus } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Page, SectionTitle } from "../../../components/shell/page.js";
+import { useViewing } from "../../../components/shell/viewing.js";
 import {
   Badge,
   Banner,
@@ -17,23 +18,23 @@ import {
 } from "../../../components/ui.js";
 import { DAY_LABEL, DAYS, dayAndTime } from "../../../lib/format.js";
 import {
-  type DeviceSummary,
   getRules,
   getRulesDiff,
   getRulesHistory,
-  listDevices,
+  patchSettings,
   publishRules,
   type RulesPayload,
   type RuleWindow,
   restoreVersion,
   saveRules,
 } from "../../../lib/parent-api.js";
-import { defaultChild, publishTargets } from "../../../lib/publish-target.js";
+import { publishTargets } from "../../../lib/publish-target.js";
 import {
   compiledWindows,
   describeAction,
   describeDays,
   neverShutsDown,
+  settingChanges,
   summarise,
 } from "../../../lib/rule-summary.js";
 
@@ -52,14 +53,16 @@ import {
  * each window is summarised in words, and one sticky bar carries the edit
  * through review to publish. The draft → review → publish order (§5.8) is
  * unchanged; only its controls are.
+ *
+ * Whose rules: the child picked in the sidebar's Viewing switch. The page
+ * used to carry its own picker, which could disagree with every other page.
  */
 export default function RulesPage() {
   const [rules, setRules] = useState<RulesPayload | null>(null);
   const [windows, setWindows] = useState<RuleWindow[]>([]);
   const [setId, setSetId] = useState<string | null>(null);
-  const [childId, setChildId] = useState<string | null>(null);
-  const [childPicked, setChildPicked] = useState(false);
-  const [devices, setDevices] = useState<DeviceSummary[] | null>(null);
+  const viewing = useViewing();
+  const childId = viewing.child?.id ?? null;
   const [deviceId, setDeviceId] = useState<string>("");
   const [editing, setEditing] = useState<number | null>(null);
   const [diff, setDiff] = useState<Awaited<ReturnType<typeof getRulesDiff>> | null>(null);
@@ -79,30 +82,6 @@ export default function RulesPage() {
     void loadRules();
   }, [loadRules]);
 
-  // ⚠️ Through the API client, like every other call. This used to be a raw
-  // `fetch("/api/parent/v1/devices")`: a RELATIVE path, which resolves against
-  // the web origin, gets Next.js's 404, and returned early in silence. So the
-  // diff never loaded and the Publish button never rendered.
-  // `api-origin.test.ts` now forbids the shape.
-  useEffect(() => {
-    void (async () => {
-      try {
-        setDevices((await listDevices()).devices);
-      } catch (caught) {
-        setError(caught);
-      }
-    })();
-  }, []);
-
-  // ⚠️ WHOSE rules. This used to be `policy_sets[0]` with no way to choose:
-  // with two children the edit could land in the wrong child's set, and the
-  // publish to the right Mac answered `unchanged`. Until the parent picks,
-  // follow `defaultChild` — the first child whose rules can reach a Mac.
-  useEffect(() => {
-    if (!rules || childPicked) return;
-    setChildId(defaultChild(rules, devices ?? []));
-  }, [rules, devices, childPicked]);
-
   const saved = useMemo(
     () => rules?.policy_sets.find((candidate) => candidate.child_id === childId) ?? null,
     [rules, childId],
@@ -114,7 +93,10 @@ export default function RulesPage() {
     setEditing(null);
   }, [saved]);
 
-  const targets = useMemo(() => publishTargets(devices ?? [], childId), [devices, childId]);
+  const targets = useMemo(
+    () => publishTargets(viewing.devices, childId),
+    [viewing.devices, childId],
+  );
   const target = targets.find((device) => device.id === deviceId);
 
   // Keep the parent's pick while it is still valid; otherwise the best target.
@@ -180,38 +162,36 @@ export default function RulesPage() {
     return <Page title="Rules">{error ? <ErrorNote error={error} /> : <Spinner />}</Page>;
   }
 
-  const childName =
-    rules.children.find((child) => child.id === childId)?.displayName ?? "your child";
+  const childName = viewing.child?.displayName ?? "your child";
+
+  /** Caps are saved at once, like a draft; the review below then shows them. */
+  const saveLimits = (patch: {
+    override_max_minutes_per_day?: number;
+    override_max_grants_per_day?: number;
+  }) =>
+    run(async () => {
+      if (!setId) return;
+      await patchSettings({ policy_set_id: setId, ...patch });
+      await loadRules();
+      await loadDiff();
+    });
 
   return (
     <Page
       title="Rules"
-      subtitle={
-        target
-          ? `Bedtime for ${childName} · publishes to ${target.label ?? "this Mac"}`
-          : `Bedtime for ${childName}`
-      }
-      actions={
-        rules.children.length > 1 ? (
-          <select
-            aria-label="Whose rules"
-            className={`${inputClass} w-auto`}
-            value={childId ?? ""}
-            onChange={(event) => {
-              setChildPicked(true);
-              setChildId(event.target.value);
-            }}
-          >
-            {rules.children.map((child) => (
-              <option key={child.id} value={child.id}>
-                {child.displayName}
-              </option>
-            ))}
-          </select>
-        ) : null
-      }
+      subtitle={target ? `${childName} · publishes to ${target.label ?? "this Mac"}` : childName}
     >
       {error ? <ErrorNote error={error} /> : null}
+
+      {viewing.children !== null && !viewing.child ? (
+        <Banner tone="info" title="No children yet">
+          Add a child in{" "}
+          <Link href="/settings/children" className="underline">
+            Settings › Children &amp; devices
+          </Link>{" "}
+          to set their bedtime.
+        </Banner>
+      ) : null}
 
       {windows.length === 0 ? (
         <Banner tone="info" title="No bedtime yet">
@@ -276,12 +256,16 @@ export default function RulesPage() {
         returns 200 and changes nothing the child can see — the parent has no
         other way to notice.
       */}
-      {devices !== null && targets.length === 0 ? (
-        <Banner tone="warn" title="No Mac to publish to yet">
-          Save your rules now — a Mac receives the saved rules automatically when it finishes
-          enrolling. After that, changes are published from here. Add a Mac or check its code in{" "}
-          <Link href="/setup" className="underline">
-            Add a Mac
+      {saved ? (
+        <LimitsCard key={saved.id} caps={saved.override_caps} busy={busy} onSave={saveLimits} />
+      ) : null}
+
+      {viewing.child && viewing.children !== null && targets.length === 0 ? (
+        <Banner tone="warn" title="No device to publish to yet">
+          Save your rules now — a device receives the saved rules automatically when it finishes
+          enrolling. After that, changes are published from here. Add a device or check its code in{" "}
+          <Link href="/settings/children" className="underline">
+            Settings › Children &amp; devices
           </Link>
           .
         </Banner>
@@ -425,7 +409,7 @@ function WindowSummary({ window, onEdit }: { window: RuleWindow; onEdit: () => v
 
 function TooShortNote() {
   return (
-    <p className="mt-2 flex items-center gap-1.5 text-[13px] text-attention-foreground">
+    <p className="mt-2 flex items-center gap-1.5 text-[13px] text-attention-text">
       <AlertTriangle className="h-4 w-4 text-attention" />
       Too short to ever shut down — it only locks. Make it longer than the grace.
     </p>
@@ -569,6 +553,7 @@ function ReviewPanel({
   onPublish: () => void;
 }) {
   const compiled = compiledWindows(diff.proposed_document);
+  const alsoChanging = settingChanges(diff.current_document, diff.proposed_document);
   return (
     <Card tone={diff.confirm_immediate_effect ? "warn" : "ok"}>
       <SectionTitle>Ready to publish to {macName}</SectionTitle>
@@ -592,6 +577,17 @@ function ReviewPanel({
         </ul>
       ) : compiled ? (
         <p className="mt-3 text-sm">No bedtime windows — the Mac will not lock.</p>
+      ) : null}
+
+      {alsoChanging.length > 0 ? (
+        <div className="mt-3 text-sm">
+          <p className="font-medium">Also changing</p>
+          <ul className="mt-1 space-y-0.5 text-foreground/85">
+            {alsoChanging.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </div>
       ) : null}
 
       {/*
@@ -621,6 +617,72 @@ function ReviewPanel({
         <Button variant="primary" disabled={busy} onClick={onPublish}>
           {diff.confirm_immediate_effect ? "Publish anyway" : "Publish"}
         </Button>
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * Extra time limits — moved here from Settings, because they belong to one
+ * child's rules like the windows above them do.
+ *
+ * ⚠️ They are compiled into the policy document, so saving one changes
+ * nothing on the Mac until the next publish. The old Settings page said
+ * "Saved" and stopped; the Mac kept the old caps. Here the review panel
+ * appears straight after, naming the change.
+ */
+function LimitsCard({
+  caps,
+  busy,
+  onSave,
+}: {
+  caps: { max_minutes_per_day: number; max_grants_per_day: number };
+  busy: boolean;
+  onSave: (patch: {
+    override_max_minutes_per_day?: number;
+    override_max_grants_per_day?: number;
+  }) => Promise<void>;
+}) {
+  return (
+    <Card>
+      <SectionTitle>Extra time limits</SectionTitle>
+      <p className="mt-1 text-sm text-muted-foreground">
+        The most the +15 / +30 / +60 buttons can add. Enforced on the Mac as well as here, so these
+        numbers are what actually happens once published.
+      </p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <Field label="Extra time allowed per day (minutes)">
+          <input
+            type="number"
+            className={inputClass}
+            defaultValue={caps.max_minutes_per_day}
+            min={0}
+            max={480}
+            disabled={busy}
+            onBlur={(event) => {
+              const next = Number(event.target.value);
+              if (Number.isFinite(next) && next !== caps.max_minutes_per_day) {
+                void onSave({ override_max_minutes_per_day: next });
+              }
+            }}
+          />
+        </Field>
+        <Field label="Grants allowed per day">
+          <input
+            type="number"
+            className={inputClass}
+            defaultValue={caps.max_grants_per_day}
+            min={0}
+            max={10}
+            disabled={busy}
+            onBlur={(event) => {
+              const next = Number(event.target.value);
+              if (Number.isFinite(next) && next !== caps.max_grants_per_day) {
+                void onSave({ override_max_grants_per_day: next });
+              }
+            }}
+          />
+        </Field>
       </div>
     </Card>
   );
