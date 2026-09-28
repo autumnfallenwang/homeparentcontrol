@@ -6,9 +6,11 @@ import {
   agentStatusIntervals,
   children,
   devices,
+  enforcementLog,
   events,
   households,
   policySets,
+  usageDaily,
   users,
 } from "../db/schema.js";
 import { projectEvents } from "../jobs/project.js";
@@ -16,14 +18,15 @@ import { HISTORY_TEXT, loadHistory } from "./history.js";
 import { reportQuery } from "./report-query.js";
 
 /**
- * `history.ts` against real Postgres: the boot ID it decides "turned on" by
- * comes from a JOIN to `events`, which the pure tests cannot exercise.
+ * `history.ts` against real Postgres: rows the projector wrote from real
+ * events, plus the `power_on` row the sync handler writes, read back through
+ * the same loader the device page and Activity use.
  */
 const hasDb = Boolean(process.env.DATABASE_URL);
 const d = hasDb ? describe : describe.skip;
 
-const BOOT_A = "boot-aaaa";
-const BOOT_B = "boot-bbbb";
+/** Per-PROCESS, as the agent really sends it — nothing may read it as a boot. */
+const PROCESS_ID = "process-1";
 const T0 = new Date("2026-09-20T21:00:00.000Z");
 const minutes = (n: number) => new Date(T0.getTime() + n * 60_000);
 
@@ -67,7 +70,6 @@ async function emit(
   type: string,
   data: Record<string, unknown>,
   at: Date,
-  bootId: string,
 ) {
   seq++;
   await db.insert(events).values({
@@ -78,20 +80,31 @@ async function emit(
     v: 1,
     class: "audit",
     ts: at,
-    bootId,
+    bootId: PROCESS_ID,
     seq,
     data,
   });
 }
 
 /** Ivy's test on 28 Sep, shrunk: installed, a bedtime shutdown, turned back on. */
-async function bedtimeCycle(f: { householdId: string; deviceId: string }) {
-  await emit(f, "agent.started", { clean_exit_previous_run: "false" }, minutes(0), BOOT_A);
-  await emit(f, "enforcement.action_taken", { action: "lock" }, minutes(10), BOOT_A);
-  await emit(f, "enforcement.action_taken", { action: "shutdown" }, minutes(11), BOOT_A);
-  await emit(f, "agent.stopping", { reason: "signal" }, minutes(11), BOOT_A);
-  await emit(f, "agent.stopping", { reason: "signal" }, minutes(11), BOOT_A);
-  await emit(f, "agent.started", { clean_exit_previous_run: "true" }, minutes(20), BOOT_B);
+async function bedtimeCycle(f: { householdId: string; childId: string; deviceId: string }) {
+  await emit(f, "agent.started", { clean_exit_previous_run: "false" }, minutes(0));
+  await emit(f, "enforcement.action_taken", { action: "lock" }, minutes(10));
+  await emit(f, "enforcement.action_taken", { action: "shutdown" }, minutes(11));
+  await emit(f, "agent.stopping", { reason: "signal" }, minutes(11));
+  await emit(f, "agent.stopping", { reason: "signal" }, minutes(11));
+  // What `recordPowerOn` in routes/sync.ts writes when the uptime drops.
+  await db.insert(enforcementLog).values({
+    householdId: f.householdId,
+    deviceId: f.deviceId,
+    childId: f.childId,
+    eventId: randomUUID(),
+    kind: "power_on",
+    occurredAt: minutes(19),
+    summary: "Mac turned on",
+    detail: { source: "server" },
+  });
+  await emit(f, "agent.started", { clean_exit_previous_run: "true" }, minutes(20));
 }
 
 beforeEach(async () => {
@@ -106,7 +119,7 @@ afterAll(async () => {
 });
 
 d("history, projected from real events", () => {
-  it("★ a bedtime shutdown and power-on come out as the red lines, via the boot join", async () => {
+  it("★ a bedtime shutdown and the server's power-on come out as the red lines", async () => {
     const f = await seed();
     await bedtimeCycle(f);
     await projectEvents();
@@ -128,11 +141,11 @@ d("history, projected from real events", () => {
     expect(history.startups).toBe(1);
   });
 
-  it("★ a window that starts mid-story still knows the boot before it", async () => {
+  it("★ a window that starts mid-story still knows the device had history before it", async () => {
     const f = await seed();
     await bedtimeCycle(f);
     await projectEvents();
-    // Only the power-on is inside the window; the boot before it is not.
+    // Only the power-on and the boot's launch are inside the window.
     const history = await loadHistory({
       householdId: f.householdId,
       deviceId: f.deviceId,
@@ -145,7 +158,7 @@ d("history, projected from real events", () => {
     const f = await seed();
     const other = await addChild(f.householdId, "Aaron");
     await bedtimeCycle(f);
-    await bedtimeCycle({ householdId: f.householdId, deviceId: other.deviceId });
+    await bedtimeCycle({ householdId: f.householdId, ...other });
     await projectEvents();
 
     const payload = await reportQuery({
@@ -178,5 +191,32 @@ d("history, projected from real events", () => {
       grain: "hour",
     });
     expect(payload.gaps).toEqual([]);
+  });
+
+  /**
+   * ★ #5, "Active time 0 m" for both children on 28 Sep. The daily grain
+   * filtered `local_day < day(to)`, and `to` is NOW — so the day in progress,
+   * the only day two Macs set up that morning had, was never counted.
+   */
+  it("★ the daily grain counts the day that is still in progress", async () => {
+    const f = await seed();
+    const now = new Date();
+    await db.insert(usageDaily).values({
+      householdId: f.householdId,
+      deviceId: f.deviceId,
+      childId: f.childId,
+      localDay: now.toISOString().slice(0, 10),
+      bundleId: "com.apple.Safari",
+      foregroundS: 600,
+      activeS: 480,
+    });
+    const payload = await reportQuery({
+      householdId: f.householdId,
+      childId: f.childId,
+      from: new Date(now.getTime() - 7 * 86_400_000),
+      to: now,
+      grain: "day",
+    });
+    expect(payload.totals.activeS).toBe(480);
   });
 });

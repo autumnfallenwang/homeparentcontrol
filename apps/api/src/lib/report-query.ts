@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { agentStatusIntervals, children, devices, usageDaily, usageHourly } from "../db/schema.js";
 import { type HistoryRow, loadHistory } from "./history.js";
@@ -186,7 +186,10 @@ async function dailyBuckets(request: ReportRequest): Promise<UsageBucket[]> {
   const scope = [
     eq(usageDaily.householdId, request.householdId),
     gte(usageDaily.localDay, isoDay(request.from)),
-    lt(usageDaily.localDay, isoDay(request.to)),
+    // ★ Up to and INCLUDING the day `to` falls in. `to` is exclusive and
+    // usually "now", and `local_day < day(now)` dropped the day in progress —
+    // which read "Active time 0 m" for any Mac set up that day (#5).
+    lte(usageDaily.localDay, isoDay(new Date(request.to.getTime() - 1))),
   ];
   if (request.childId) scope.push(eq(usageDaily.childId, request.childId));
   if (request.deviceId) scope.push(eq(usageDaily.deviceId, request.deviceId));

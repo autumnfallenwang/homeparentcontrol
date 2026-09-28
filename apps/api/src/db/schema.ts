@@ -14,6 +14,7 @@ import {
   boolean,
   check,
   date,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -219,6 +220,10 @@ export const devices = pgTable(
     lastTickSeq: integer(),
     lastBootId: text(),
     systemBootTime: timestamp({ withTimezone: true }), // gap attribution, §7.4
+    // ★ The Mac's uptime at its last check-in. Uptime only ever goes DOWN on a reboot, so a drop
+    //   is the one trustworthy "the Mac was turned on": `boot_id` is a per-PROCESS id, and
+    //   `system_boot_time` is now − uptime, which drifts after sleep and moves with the clock.
+    lastUptimeS: doublePrecision(),
     agentVersion: text(),
     osVersion: text(),
     arch: text(),

@@ -8,6 +8,7 @@ import {
   children,
   desiredItems,
   devices,
+  enforcementLog,
   households,
   policySets,
   policyVersions,
@@ -346,6 +347,76 @@ d("POST /sync — tripwires", () => {
       .where(and(eq(tripwires.deviceId, f.deviceId), eq(tripwires.kind, "network_time_disabled")));
     expect(rows).toHaveLength(1);
     expect(rows[0]?.occurrences).toBe(3);
+  });
+});
+
+d("POST /sync — power-on and clock (found 2026-09-28)", () => {
+  beforeEach(wipe);
+
+  const uptime = (seconds: number) => seconds * 1e9;
+
+  async function powerOns(deviceId: string) {
+    return db
+      .select({ occurredAt: enforcementLog.occurredAt, summary: enforcementLog.summary })
+      .from(enforcementLog)
+      .where(and(eq(enforcementLog.deviceId, deviceId), eq(enforcementLog.kind, "power_on")));
+  }
+
+  it("★ uptime falling between two check-ins records 'Mac turned on' at the reported boot", async () => {
+    const f = await seed();
+    const before = tick(f.deviceId);
+    before.clock.continuous_ns = uptime(7_200);
+    await sync(f.token, before);
+
+    const after = tick(f.deviceId);
+    after.clock.continuous_ns = uptime(40);
+    after.device.system_boot_time = "2026-09-21T07:59:20.000Z";
+    await sync(f.token, after);
+
+    const rows = await powerOns(f.deviceId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.summary).toBe("Mac turned on");
+    expect(rows[0]?.occurredAt.toISOString()).toBe("2026-09-21T07:59:20.000Z");
+  });
+
+  it("★ uptime still rising is no reboot — even when the reported boot time moved", async () => {
+    // What sleep and a changed clock both do to `system_boot_time`
+    // (now − uptime, and uptime pauses in sleep). Trusting it would invent
+    // a power-on every morning.
+    const f = await seed();
+    const before = tick(f.deviceId);
+    before.clock.continuous_ns = uptime(3_600);
+    await sync(f.token, before);
+    const after = tick(f.deviceId);
+    after.clock.continuous_ns = uptime(3_700);
+    after.device.system_boot_time = "2026-09-20T17:00:00.000Z";
+    await sync(f.token, after);
+    expect(await powerOns(f.deviceId)).toEqual([]);
+  });
+
+  it("the first check-in ever records nothing — there is nothing to compare with", async () => {
+    const f = await seed();
+    const first = tick(f.deviceId);
+    first.clock.continuous_ns = uptime(30);
+    await sync(f.token, first);
+    expect(await powerOns(f.deviceId)).toEqual([]);
+  });
+
+  it("★ a Mac clock far from the server's raises clock_skew — the agent's estimate is always 0", async () => {
+    const f = await seed();
+    const t = tick(f.deviceId);
+    t.clock.local_utc = new Date(Date.now() + 43 * 3_600_000).toISOString();
+    t.clock.skew_estimate_ms = 0; // what the agent really sends
+    await sync(f.token, t);
+    expect(await tripwireKinds(f.deviceId)).toContain("clock_skew");
+  });
+
+  it("a clock a few seconds off is not skew", async () => {
+    const f = await seed();
+    const t = tick(f.deviceId);
+    t.clock.local_utc = new Date(Date.now() + 5_000).toISOString();
+    await sync(f.token, t);
+    expect(await tripwireKinds(f.deviceId)).not.toContain("clock_skew");
   });
 });
 

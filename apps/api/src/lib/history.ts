@@ -1,23 +1,28 @@
 import { and, desc, eq, gte, inArray, lt, type SQL } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { devices, enforcementLog, events, policyVersions } from "../db/schema.js";
+import { devices, enforcementLog, policyVersions } from "../db/schema.js";
 
 /**
  * "What actually happened", as a parent reads it.
  *
  * `enforcement_log` holds one row per agent event, in the agent's own terms:
  * a bedtime shutdown is "Enforced: shutdown" plus "Agent stopped cleanly"
- * TWICE (the enforcer and sync each say it), a power-on is "Agent started",
- * and every rule change is "Applied policy version N". Accurate, and
- * unreadable. This turns those rows into the handful of lines a parent
- * actually wants, at READ time — so history projected before this existed
- * reads the same way, with no backfill.
+ * TWICE (the enforcer and sync each say it), and every rule change is
+ * "Applied policy version N". Accurate, and unreadable. This turns those rows
+ * into the handful of lines a parent actually wants, at READ time — so
+ * history projected before this existed reads the same way, with no backfill.
  *
- * ⚠️ **"Turned on" is decided by the boot ID, never by the word "started".**
- * The enforcer says `agent.started` on every launch: at boot, but also after
- * an install, an upgrade, or launchd restarting it. Only a start on a boot the
- * Mac was not already on is a power-on. A start whose boot is unknown is never
- * called one — that would be claiming something we do not know.
+ * ⚠️ **"Turned on" comes from the server's own `power_on` rows** (see
+ * `recordPowerOn` in `routes/sync.ts`: the Mac's uptime dropped between two
+ * check-ins). NOT from the agent's `boot_id`: each daemon invents that per
+ * PROCESS, and events spooled before a shutdown are stamped with the next
+ * process's id when drained — trusting it produced a "turned on" BEFORE the
+ * shutdown it followed, on real data (2026-09-28).
+ *
+ * One inference is kept, for history recorded before `power_on` rows existed:
+ * after a shutdown the ENFORCER itself ordered at bedtime, the next launch is
+ * the boot. A stop with no enforced shutdown and no `power_on` after it is
+ * never called a power cycle — it may have been an install or an upgrade.
  */
 
 export type HistoryTone = "alarm" | "plain";
@@ -32,7 +37,7 @@ export interface HistoryRow {
   tone: HistoryTone;
 }
 
-/** One `enforcement_log` row, with the boot it happened in. */
+/** One `enforcement_log` row. */
 export interface RawHistoryRow {
   deviceId: string;
   kind: string;
@@ -40,13 +45,10 @@ export interface RawHistoryRow {
   occurredAt: Date;
   policyVersion: number | null;
   detail: unknown;
-  bootId: string | null;
 }
 
 /** What was true for a device just before the rows being presented. */
 export interface DeviceContext {
-  /** The boot of the last row before the window; null when unknown. */
-  bootBefore: string | null;
   /** Whether the device has ANY history before the window. */
   hasHistoryBefore: boolean;
   /** The last policy version it applied before the window. */
@@ -55,7 +57,7 @@ export interface DeviceContext {
   removed: boolean;
 }
 
-/** Why a policy version was made — `policy_versions.reason`, and whether a parent did it. */
+/** Why a policy version was made — `policy_versions.publish_reason`, and whether a parent did it. */
 export interface PolicyReason {
   reason: string;
   byParent: boolean;
@@ -67,6 +69,7 @@ export const HISTORY_TEXT = {
   shutDownAtBedtime: "Mac shut down at bedtime",
   started: "Parental controls started",
   restarted: "Parental controls restarted",
+  stopped: "Parental controls stopped",
   removed: "Parental controls removed",
   registered: "Mac registered",
   rules: {
@@ -81,9 +84,10 @@ export const HISTORY_TEXT = {
 
 /** Rows of one stop within this long of each other are one stop. */
 const STOP_EPISODE_MS = 120_000;
+/** The enforcer's launch this soon after a power-on is that boot, not news. */
+const BOOT_LAUNCH_MS = 15 * 60_000;
 
 const EMPTY_CONTEXT: DeviceContext = {
-  bootBefore: null,
   hasHistoryBefore: false,
   versionBefore: null,
   removed: false,
@@ -105,6 +109,9 @@ function isEnrolmentStart(row: RawHistoryRow): boolean {
   return (row.detail as Record<string, unknown> | null)?.enrolled === true;
 }
 
+/** A presented row, plus where in the raw story it happened (for ties). */
+type Sequenced = HistoryRow & { seq: number };
+
 /**
  * Present raw rows, ASCENDING by time, as the parent's history, NEWEST first.
  * Pure, so every rule below has a test that does not need a database.
@@ -123,7 +130,7 @@ export function presentHistory(
 
   const out: Sequenced[] = [];
   for (const [deviceId, list] of byDevice) {
-    out.push(...presentDevice(list, contexts.get(deviceId) ?? EMPTY_CONTEXT, reasons));
+    out.push(...presentDevice(deviceId, list, contexts.get(deviceId) ?? EMPTY_CONTEXT, reasons));
   }
   // Newest first; within one instant, the row that came LATER in the story
   // first — so a lock and the shutdown in the same second read "locked, then
@@ -133,168 +140,131 @@ export function presentHistory(
     .map(({ seq: _seq, ...row }) => row);
 }
 
-/** A presented row, plus where in the raw story it happened (for ties). */
-type Sequenced = HistoryRow & { seq: number };
-
 function presentDevice(
+  deviceId: string,
   rows: RawHistoryRow[],
   context: DeviceContext,
   reasons: Map<string, PolicyReason>,
 ): Sequenced[] {
   const out: Sequenced[] = [];
   let seq = 0;
-  let lastBoot = context.bootBefore;
   let seenAny = context.hasHistoryBefore;
   let lastVersion = context.versionBefore;
-  let stop: {
-    at: Date;
-    lastAt: Date;
-    lastSeq: number;
-    bootId: string | null;
-    bedtime: boolean;
-  } | null = null;
+  let lastPowerOn: Date | null = null;
+  let stop: { at: Date; lastAt: Date; lastSeq: number; bedtime: boolean } | null = null;
 
-  const emit = (
-    row: RawHistoryRow | null,
+  const push = (
     at: Date,
     kind: string,
     summary: string,
     tone: HistoryTone,
+    rowSeq = seq,
+    policyVersion: number | null = null,
   ) =>
-    out.push({
-      at: at.toISOString(),
-      kind,
-      summary,
-      deviceId: row?.deviceId ?? "",
-      policyVersion: row?.policyVersion ?? null,
-      tone,
-      seq,
-    });
+    out.push({ at: at.toISOString(), kind, summary, deviceId, policyVersion, tone, seq: rowSeq });
 
-  const emitShutdown = (deviceId: string) => {
+  /** The Mac went off: at the stop's start, sorted after anything else in it. */
+  const shutDown = () => {
     if (!stop) return;
-    out.push({
-      at: stop.at.toISOString(),
-      kind: "power_off",
-      summary: stop.bedtime ? HISTORY_TEXT.shutDownAtBedtime : HISTORY_TEXT.shutDown,
-      deviceId,
-      policyVersion: null,
-      tone: "alarm",
-      // The Mac went off at the END of its stop, after anything else in it.
-      seq: stop.lastSeq,
-    });
+    const text = stop.bedtime ? HISTORY_TEXT.shutDownAtBedtime : HISTORY_TEXT.shutDown;
+    push(stop.at, "power_off", text, "alarm", stop.lastSeq);
+    stop = null;
+  };
+
+  /** A stop nothing has explained yet — a bedtime shutdown is still known to be one. */
+  const unexplainedStop = () => {
+    if (!stop) return;
+    if (stop.bedtime) return shutDown();
+    push(stop.at, "agent_stopped", HISTORY_TEXT.stopped, "plain", stop.lastSeq);
     stop = null;
   };
 
   for (const row of rows) {
     seq++;
-    // ── A stop: collect the pair of `agent_stopping` rows and any enforced
-    // shutdown around them into ONE stop, and decide what it was later —
-    // whether the next start is on a new boot is what says "shut down".
+
+    // ── Collect the pair of `agent_stopping` rows and any enforced shutdown
+    // around them into ONE stop; what it was is decided by what comes next.
     if (isStopPart(row)) {
-      const sameEpisode =
-        stop !== null &&
-        stop.bootId === row.bootId &&
-        row.occurredAt.getTime() - stop.lastAt.getTime() <= STOP_EPISODE_MS;
-      if (stop && !sameEpisode) emitShutdown(row.deviceId);
-      if (!stop) {
-        stop = {
-          at: row.occurredAt,
-          lastAt: row.occurredAt,
-          lastSeq: seq,
-          bootId: row.bootId,
-          bedtime: false,
-        };
+      if (stop && row.occurredAt.getTime() - stop.lastAt.getTime() > STOP_EPISODE_MS) {
+        unexplainedStop();
       }
+      if (!stop)
+        stop = { at: row.occurredAt, lastAt: row.occurredAt, lastSeq: seq, bedtime: false };
       stop.lastAt = row.occurredAt;
       stop.lastSeq = seq;
       if (action(row) === "shutdown") stop.bedtime = true;
-      lastBoot = row.bootId ?? lastBoot;
       seenAny = true;
       continue;
     }
 
-    const bootChanged = row.bootId !== null && lastBoot !== null && row.bootId !== lastBoot;
-
-    if (bootChanged) {
-      // The Mac rebooted. A clean stop before it was the shutdown; without
-      // one it went off some other way (power cut, forced restart).
-      emitShutdown(row.deviceId);
-      emit(row, row.occurredAt, "power_on", HISTORY_TEXT.turnedOn, "alarm");
-      lastBoot = row.bootId;
-      seenAny = true;
-      // The enforcer's own start IS the power-on line; anything else still shows.
-      if (row.kind === "agent_started" && !isEnrolmentStart(row)) continue;
-    } else if (stop && row.kind === "agent_started" && !isEnrolmentStart(row)) {
-      if (row.bootId !== null && row.bootId === stop.bootId) {
-        // Stopped and started again without a reboot: an install, an
-        // upgrade, or launchd restarting it. Not a power event.
-        stop = null;
-        emit(row, row.occurredAt, "agent_restarted", HISTORY_TEXT.restarted, "plain");
-      } else {
-        // Boot unknown on one side — do not claim a power cycle.
-        stop = null;
-        emit(row, row.occurredAt, "agent_started", HISTORY_TEXT.started, "plain");
-      }
-      lastBoot = row.bootId ?? lastBoot;
+    if (row.kind === "power_on") {
+      // The server saw the uptime drop: whatever stop came before WAS the shutdown.
+      shutDown();
+      push(row.occurredAt, "power_on", HISTORY_TEXT.turnedOn, "alarm");
+      lastPowerOn = row.occurredAt;
       seenAny = true;
       continue;
     }
 
     if (row.kind === "agent_started") {
       if (isEnrolmentStart(row)) {
-        emit(row, row.occurredAt, "registered", HISTORY_TEXT.registered, "plain");
-      } else if (!bootChanged) {
-        const kind = seenAny && row.bootId !== null ? "agent_restarted" : "agent_started";
-        emit(
-          row,
+        push(row.occurredAt, "registered", HISTORY_TEXT.registered, "plain");
+      } else if (
+        lastPowerOn !== null &&
+        row.occurredAt.getTime() - lastPowerOn.getTime() <= BOOT_LAUNCH_MS
+      ) {
+        // The enforcer launching at that boot — the power-on line already says it.
+        lastPowerOn = null;
+      } else if (stop?.bedtime) {
+        // History from before `power_on` rows: the enforcer shut the Mac down,
+        // so its next launch is the Mac coming back on.
+        shutDown();
+        push(row.occurredAt, "power_on", HISTORY_TEXT.turnedOn, "alarm");
+      } else if (stop) {
+        // Stopped and started with no power-on between: an install, an
+        // upgrade, or launchd restarting it.
+        stop = null;
+        push(row.occurredAt, "agent_restarted", HISTORY_TEXT.restarted, "plain");
+      } else {
+        const kind = seenAny ? "agent_restarted" : "agent_started";
+        push(
           row.occurredAt,
           kind,
-          kind === "agent_restarted" ? HISTORY_TEXT.restarted : HISTORY_TEXT.started,
+          seenAny ? HISTORY_TEXT.restarted : HISTORY_TEXT.started,
           "plain",
         );
       }
-      lastBoot = row.bootId ?? lastBoot;
       seenAny = true;
       continue;
     }
 
     if (row.kind === "policy_applied") {
-      const version = row.policyVersion;
-      lastBoot = row.bootId ?? lastBoot;
       seenAny = true;
+      const version = row.policyVersion;
       // The same version again is the agent re-applying what it already had
       // after a restart. Nothing reached the Mac.
       if (version !== null && version === lastVersion) continue;
       lastVersion = version ?? lastVersion;
-      const why = version === null ? undefined : reasons.get(`${row.deviceId}:${version}`);
+      const why = version === null ? undefined : reasons.get(`${deviceId}:${version}`);
       // The nightly top-up of the schedule horizon: nothing changed for the parent.
       if (why?.reason === "calendar" && !why.byParent) continue;
-      emit(row, row.occurredAt, "policy_applied", rulesText(why), "plain");
+      push(row.occurredAt, "policy_applied", rulesText(why), "plain", seq, version);
       continue;
     }
 
-    emit(row, row.occurredAt, row.kind, row.summary, "plain");
-    lastBoot = row.bootId ?? lastBoot;
+    push(row.occurredAt, row.kind, row.summary, "plain", seq, row.policyVersion);
     seenAny = true;
   }
 
-  // A stop with nothing after it: the Mac is still off — or, for a removed
-  // device, that stop was the uninstall.
-  if (stop && rows.length > 0) {
-    const deviceId = (rows[0] as RawHistoryRow).deviceId;
+  // A stop with nothing after it: a removed device's uninstall, a Mac still
+  // off after a bedtime shutdown, or a stop nothing has explained yet.
+  if (stop) {
+    const pending: { at: Date; lastSeq: number } = stop;
     if (context.removed) {
-      out.push({
-        at: (stop as { at: Date }).at.toISOString(),
-        kind: "agent_removed",
-        summary: HISTORY_TEXT.removed,
-        deviceId,
-        policyVersion: null,
-        tone: "plain",
-        seq: (stop as { lastSeq: number }).lastSeq,
-      });
+      push(pending.at, "agent_removed", HISTORY_TEXT.removed, "plain", pending.lastSeq);
+      stop = null;
     } else {
-      emitShutdown(deviceId);
+      unexplainedStop();
     }
   }
   return out;
@@ -340,7 +310,7 @@ export interface HistoryResult {
 
 const DEFAULT_LIMIT = 5_000;
 
-/** The raw rows, joined to the event each came from for its boot ID. */
+/** The raw rows, newest first. */
 function rawRows(where: SQL | undefined, limit: number) {
   return db
     .select({
@@ -350,13 +320,8 @@ function rawRows(where: SQL | undefined, limit: number) {
       occurredAt: enforcementLog.occurredAt,
       policyVersion: enforcementLog.policyVersion,
       detail: enforcementLog.detail,
-      bootId: events.bootId,
     })
     .from(enforcementLog)
-    .leftJoin(
-      events,
-      and(eq(events.deviceId, enforcementLog.deviceId), eq(events.eventId, enforcementLog.eventId)),
-    )
     .where(where)
     .orderBy(desc(enforcementLog.occurredAt))
     .limit(limit);
@@ -401,7 +366,6 @@ export async function loadHistory(request: HistoryRequest): Promise<HistoryResul
           .orderBy(desc(enforcementLog.occurredAt))
           .limit(1);
         contexts.set(deviceId, {
-          bootBefore: previous?.bootId ?? null,
           hasHistoryBefore: previous !== undefined,
           versionBefore: applied?.version ?? null,
           removed: statuses.find((row) => row.id === deviceId)?.status === "decommissioned",

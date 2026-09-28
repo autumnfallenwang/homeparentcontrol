@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   CONTRACT_MINOR,
   type PolicyDocument,
@@ -8,7 +9,7 @@ import {
 import { and, desc, eq, lte, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db/index.js";
-import { desiredItems, devices, policySets, policyVersions } from "../db/schema.js";
+import { desiredItems, devices, enforcementLog, policySets, policyVersions } from "../db/schema.js";
 import { negotiate } from "../lib/capabilities.js";
 import { log } from "../lib/logger.js";
 import { ProblemError } from "../lib/problem.js";
@@ -56,6 +57,12 @@ type Cadence = "base" | "boundary" | "attended";
  * should be revisited against a real agent.
  */
 const CLOCK_SKEW_LIMIT_MS = 60_000;
+
+/**
+ * Uptime has to fall by more than this to count as a reboot. It only ever
+ * rises within one boot (it pauses in sleep); the slack absorbs float noise.
+ */
+const REBOOT_SLACK_S = 5;
 /** Borrowed from `schedule_windows.escalate_after_failures`, which defaults to 3. */
 const EVAL_FAILURES_LIMIT = 3;
 /** 3 × the enforcer's unconditional 60 s tick. */
@@ -125,12 +132,20 @@ export async function handleSync(c: Context): Promise<Response> {
       systemBootTime: devices.systemBootTime,
       appliedPolicyVersion: devices.appliedPolicyVersion,
       attendedUntil: devices.attendedUntil,
+      childId: devices.childId,
+      lastUptimeS: devices.lastUptimeS,
     })
     .from(devices)
     .where(eq(devices.id, deviceId));
   if (!device) throw new ProblemError("scopeViolation", "device not found");
 
-  await recordTripwires(body, deviceId, device);
+  // ★ Measured HERE, not trusted from the body: the agent's own
+  // `skew_estimate_ms` is a hard-coded 0, which is why a Mac whose clock ran
+  // 43 hours fast raised nothing (found 2026-09-28).
+  const skewMs = Date.parse(body.clock.local_utc) - Date.now();
+
+  await recordTripwires(body, deviceId, device, skewMs);
+  await recordPowerOn(body, deviceId, device);
   await applyConvergence(body, deviceId);
 
   // ⚠️ Observations only. `health_state`, `health_reason` and `health_since`
@@ -144,6 +159,7 @@ export async function handleSync(c: Context): Promise<Response> {
       lastTickSeq: body.agent.tick_seq,
       lastBootId: body.device.boot_id,
       systemBootTime: new Date(body.device.system_boot_time),
+      lastUptimeS: body.clock.continuous_ns / 1e9,
       agentVersion: body.device.agent_version,
       osVersion: body.device.os_version,
       arch: body.device.arch,
@@ -199,6 +215,45 @@ type DeviceRow = {
 };
 
 /**
+ * "Mac turned on", recorded by the SERVER from the one signal that means it.
+ *
+ * ⚠️ Not from the agent's `boot_id` — each daemon makes that up per PROCESS,
+ * and events the enforcer spooled before a shutdown are stamped with the NEXT
+ * process's id when they are drained. Not from `system_boot_time` either: the
+ * agent computes it as now − uptime, and uptime pauses in sleep, so it drifts
+ * forward after every sleep and jumps whenever the clock is changed.
+ *
+ * Uptime itself only goes DOWN across a reboot. So: a drop since the last
+ * check-in is a power-on, stamped at the boot time this sync reports — right
+ * after a boot there has been no sleep for it to drift by.
+ */
+async function recordPowerOn(
+  body: SyncRequest,
+  deviceId: string,
+  device: DeviceRow & { childId: string; lastUptimeS: number | null },
+): Promise<void> {
+  const uptimeS = body.clock.continuous_ns / 1e9;
+  if (device.lastUptimeS === null || uptimeS + REBOOT_SLACK_S >= device.lastUptimeS) return;
+
+  const bootTime = new Date(body.device.system_boot_time);
+  await db.insert(enforcementLog).values({
+    householdId: device.householdId,
+    deviceId,
+    childId: device.childId,
+    // Not from an agent event; a fresh id keeps it clear of the projector's upserts.
+    eventId: randomUUID(),
+    kind: "power_on",
+    occurredAt: bootTime,
+    summary: "Mac turned on",
+    detail: { uptime_s: uptimeS, previous_uptime_s: device.lastUptimeS, source: "server" },
+  });
+  log.info(
+    { event: "device.power_on", device_id: deviceId, boot_time: bootTime.toISOString() },
+    "the Mac was turned on",
+  );
+}
+
+/**
  * The seven tripwires computable from a sync body.
  *
  * ⚠️ TWO of the schema's nine kinds are deliberately NOT raised here.
@@ -211,6 +266,7 @@ async function recordTripwires(
   body: SyncRequest,
   deviceId: string,
   device: DeviceRow,
+  skewMs: number,
 ): Promise<void> {
   const raise = (kind: TripwireKind, detail: Record<string, unknown>) =>
     raiseTripwire({ householdId: device.householdId, deviceId, kind, detail });
@@ -228,6 +284,10 @@ async function recordTripwires(
 
   if (body.clock.using_network_time === false) {
     pending.push(raise("network_time_disabled", { skew_ms: body.clock.skew_estimate_ms }));
+  }
+
+  if (Math.abs(skewMs) > CLOCK_SKEW_LIMIT_MS) {
+    pending.push(raise("clock_skew", { skew_ms: Math.round(skewMs) }));
   }
 
   // A.30 — the system zone is reported, never an input. A mismatch is worth

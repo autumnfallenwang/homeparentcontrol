@@ -17,7 +17,7 @@ import { tripwires } from "../db/schema.js";
  * deliberately absent.
  */
 
-/** The nine kinds the schema comment names. Not all are raised — see sync.ts. */
+/** The schema comment's nine kinds, plus `clock_skew`. Not all are raised — see sync.ts. */
 export const TRIPWIRE_KINDS = [
   "hardware_uuid_mismatch",
   "unexpected_source_ip",
@@ -28,6 +28,8 @@ export const TRIPWIRE_KINDS = [
   "timezone_mismatch",
   "agent_stopped_while_up",
   "kill_switch_present",
+  // Measured by the server from the Mac's reported time — the agent's own estimate is a placeholder.
+  "clock_skew",
 ] as const;
 
 export type TripwireKind = (typeof TRIPWIRE_KINDS)[number];

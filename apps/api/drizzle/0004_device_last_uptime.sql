@@ -1,0 +1,1 @@
+ALTER TABLE "devices" ADD COLUMN "last_uptime_s" double precision;

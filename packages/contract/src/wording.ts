@@ -354,6 +354,12 @@ export function tripwirePhrasing(kind: string, subject: Subject): TripwirePhrasi
         // ⚠️ Worth saying plainly: the clock is not a way around bedtime.
         benign: "Bedtime still applies — the rules use the timezone in the policy, not the Mac's.",
       };
+    case "clock_skew":
+      return {
+        severity: "warn",
+        summary: `${deviceLabel}'s clock doesn't match the real time.`,
+        benign: "A Mac whose date was changed by hand, or that lost network time, looks like this.",
+      };
     case "timezone_mismatch":
       return {
         severity: "info",

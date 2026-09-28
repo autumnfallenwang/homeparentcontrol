@@ -29,6 +29,13 @@
       "when": 1789888678149,
       "tag": "0003_device_credential_rotation",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790623540021,
+      "tag": "0004_device_last_uptime",
+      "breakpoints": true
     }
   ]
 }

@@ -68,6 +68,7 @@ async function emit(
   type: string,
   data: Record<string, unknown>,
   at: Date = HOUR,
+  bootId: string = BOOT,
 ): Promise<string> {
   seq++;
   const eventId = `018f2a4c-7b31-7c9e-9d2a-${seq.toString(16).padStart(12, "0")}`;
@@ -79,7 +80,7 @@ async function emit(
     v: 1,
     class: type.startsWith("app.") ? "sample" : "audit",
     ts: at,
-    bootId: BOOT,
+    bootId,
     seq,
     data,
   });
@@ -368,6 +369,57 @@ d("projector — session_spans", () => {
     expect(rows[0]?.kind).toBe("awake");
     expect(rows[0]?.endedAt?.toISOString()).toBe("2026-09-20T21:40:00.000Z");
     expect(rows[1]?.endedAt).toBeNull(); // still open
+  });
+
+  /**
+   * ★ #3, seen on real data 2026-09-28: "active 15:45 → 15:23" (ending before
+   * it started) and several spans open at once. `boot_id` is a per-PROCESS
+   * random UUID, and the bucket was ordered by it first — so when the sync
+   * daemon restarted inside an hour, the two halves were read in whichever
+   * order the UUIDs sorted.
+   */
+  it("★ a daemon restart inside the hour does not tangle the spans", async () => {
+    const f = await seed();
+    const later = "00000000-0000-4000-8000-000000000000"; // sorts FIRST
+    const earlier = "ffffffff-0000-4000-8000-000000000000"; // sorts LAST
+    const t = (m: number) => new Date(`2026-09-20T21:${String(m).padStart(2, "0")}:00.000Z`);
+    await emit(f, "session.state", { state: "awake" }, t(5), earlier);
+    await emit(f, "session.state", { state: "locked" }, t(20), earlier);
+    await emit(f, "session.state", { state: "active" }, t(30), later);
+    await emit(f, "session.state", { state: "locked" }, t(45), later);
+    await projectEvents();
+
+    const rows = await db
+      .select()
+      .from(sessionSpans)
+      .where(eq(sessionSpans.deviceId, f.deviceId))
+      .orderBy(asc(sessionSpans.startedAt));
+    expect(
+      rows.map((r) => [r.kind, r.startedAt.toISOString(), r.endedAt?.toISOString() ?? null]),
+    ).toEqual([
+      ["awake", t(5).toISOString(), t(20).toISOString()],
+      ["locked", t(20).toISOString(), t(30).toISOString()],
+      ["active", t(30).toISOString(), t(45).toISOString()],
+      ["locked", t(45).toISOString(), null],
+    ]);
+  });
+
+  it("★ a span is closed by the next transition even in the next hour, in a later run", async () => {
+    const f = await seed();
+    await emit(f, "session.state", { state: "active" }, new Date("2026-09-20T21:50:00.000Z"));
+    await projectEvents();
+    await emit(f, "session.state", { state: "locked" }, new Date("2026-09-20T22:10:00.000Z"));
+    await projectEvents();
+
+    const rows = await db
+      .select()
+      .from(sessionSpans)
+      .where(eq(sessionSpans.deviceId, f.deviceId))
+      .orderBy(asc(sessionSpans.startedAt));
+    expect(rows.map((r) => [r.kind, r.endedAt?.toISOString() ?? null])).toEqual([
+      ["active", "2026-09-20T22:10:00.000Z"],
+      ["locked", null],
+    ]);
   });
 
   /** ⚠️ A shifted start must not orphan the old row. */

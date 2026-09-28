@@ -300,7 +300,28 @@ async function recomputeBucket(bucket: Bucket): Promise<{
   // updating it — and the bucket silently gains a span. "Recompute the whole
   // bucket" has to mean delete-then-write for anything whose key can move.
   let spans = 0;
-  const transitions = rows.filter((r) => r.type === "session.state");
+  //
+  // ★ In TIME order, not the query's (boot_id, seq) order (#3, 2026-09-28).
+  // `boot_id` is a per-PROCESS random UUID and every `session.state` comes from
+  // sync with `seq = -1`, so a sync restart inside the hour made the two halves
+  // sort in whichever order their UUIDs fell — "active 15:45 → 15:23", and
+  // several spans open at once.
+  const transitions = rows
+    .filter((r) => r.type === "session.state")
+    .sort((a, b) => a.ts.getTime() - b.ts.getTime());
+  // The first transition after this hour closes the hour's last span.
+  const [after] = await db
+    .select({ ts: events.ts })
+    .from(events)
+    .where(
+      and(
+        eq(events.deviceId, bucket.deviceId),
+        eq(events.type, "session.state"),
+        gte(events.ts, nextHour),
+      ),
+    )
+    .orderBy(asc(events.ts))
+    .limit(1);
   await db
     .delete(sessionSpans)
     .where(
@@ -318,26 +339,41 @@ async function recomputeBucket(bucket: Bucket): Promise<{
       unprojectable++;
       continue;
     }
-    const next = transitions[i + 1];
+    const endedAt = transitions[i + 1]?.ts ?? after?.ts ?? null;
     await db
       .insert(sessionSpans)
       .values({
         ...base,
         kind: parsed.data.state,
         startedAt: row.ts,
-        // Closed by the next transition in this bucket; left open otherwise,
-        // and a later bucket's recompute will close it.
-        endedAt: next?.ts ?? null,
+        // Closed by the next transition, in this hour or a later one; open
+        // only when there is none yet.
+        endedAt,
         bootId: row.bootId,
         consoleUser: parsed.data.console_user ?? null,
         endInferred: false,
       })
       .onConflictDoUpdate({
         target: [sessionSpans.deviceId, sessionSpans.kind, sessionSpans.startedAt],
-        set: { endedAt: next?.ts ?? null, consoleUser: parsed.data.console_user ?? null },
+        set: { endedAt, consoleUser: parsed.data.console_user ?? null },
       });
     spans++;
   }
+
+  // A span an EARLIER hour left open — because its closing transition had not
+  // arrived when that hour was projected — closes at the first transition
+  // after it. Without this it stays "→ now" for ever: that hour is never dirty
+  // again.
+  await db.execute(sql`
+    UPDATE session_spans s
+       SET ended_at = (
+         SELECT min(e.ts) FROM events e
+          WHERE e.device_id = s.device_id
+            AND e.type = 'session.state'
+            AND e.ts > s.started_at)
+     WHERE s.device_id = ${bucket.deviceId}
+       AND s.ended_at IS NULL
+       AND s.started_at < ${bucket.hour.toISOString()}::timestamptz`);
 
   return { usageRows: perBundle.size, enforcementRows, sessionSpans: spans, unprojectable };
 }
