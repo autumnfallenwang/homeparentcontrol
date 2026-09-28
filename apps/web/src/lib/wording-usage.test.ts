@@ -61,12 +61,12 @@ const FORBIDDEN_LITERALS: { fragment: string; why: string }[] = [
     why: "§3.5's no-unlock sentence — import LATE_GRANT_DOES_NOT_UNLOCK",
   },
   {
-    fragment: "keeps enforcing bedtime",
-    why: "§5.5's Revoke description — import REVOKE",
+    fragment: "uninstalls itself at its next check-in",
+    why: "§5.5's Remove consequence — import REMOVE_DEVICE",
   },
   {
-    fragment: "stops enforcing anything",
-    why: "§5.5's Decommission description — import DECOMMISSION",
+    fragment: "cannot be told to uninstall",
+    why: "§5.5's Remove consequence for a revoked device — import REMOVE_DEVICE",
   },
   {
     fragment: "not minutes it was switched on",
@@ -104,15 +104,13 @@ describe("the four load-bearing wordings", () => {
     const grant = files.find((file) => file.path.endsWith("grant-buttons.tsx"));
     expect(grant?.text).toContain("LATE_GRANT_DOES_NOT_UNLOCK");
 
-    // Where Revoke and Decommission are offered — Settings › Children &
-    // devices, since they left the Mac's own page. Exact path: a guard that
-    // finds "the first file mentioning devices" checks whatever sorts first.
-    const danger = files.find((file) => file.path.endsWith("components/device-danger-zone.tsx"));
-    expect(danger, "the Revoke/Decommission component must exist to be checked").toBeDefined();
-    expect(danger?.code).toContain("REVOKE");
-    expect(danger?.code).toContain("DECOMMISSION");
+    // Where Remove is offered — Settings › Children & devices. Exact path: a
+    // guard that finds "the first file mentioning devices" checks whatever
+    // sorts first. It must say what happens, before AND after.
     const settings = files.find((file) => file.path.endsWith("settings/children-devices.tsx"));
-    expect(settings?.code, "and Settings must actually render it").toContain("<DeviceDangerZone");
+    expect(settings, "the Remove confirmation must exist to be checked").toBeDefined();
+    const said = settings?.code.split("REMOVE_DEVICE.consequence(").length ?? 0;
+    expect(said - 1, "the confirmation and the done banner both say it").toBe(2);
 
     // ★ §6.5 — the card must actually render the shadow line, not merely
     // avoid hardcoding it.

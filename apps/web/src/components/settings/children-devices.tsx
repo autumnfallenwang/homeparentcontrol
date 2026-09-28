@@ -1,6 +1,7 @@
 "use client";
 
-import { Check, ChevronRight, Copy, Plus } from "lucide-react";
+import { REMOVE_DEVICE } from "@hpc/contract";
+import { Check, ChevronRight, Copy, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { apiBaseUrl } from "../../lib/api.js";
@@ -13,9 +14,9 @@ import {
   getSetup,
   getToday,
   reissueCode,
+  removeDevice,
 } from "../../lib/parent-api.js";
 import { stateLabel } from "../../lib/state-label.js";
-import { DeviceDangerZone, type EndedEnrolment } from "../device-danger-zone.js";
 import { cardPhrasing } from "../health-card.js";
 import { Page, SectionTitle } from "../shell/page.js";
 import { useViewing } from "../shell/viewing.js";
@@ -34,8 +35,8 @@ import {
 
 /**
  * Settings › Children & devices — who is in the household, and the devices
- * that enforce their bedtime. Everything that used to be "Add a Mac" and the
- * Macs list, plus ending a device's enrolment.
+ * that enforce their bedtime: add a child, add a device, set it up with its
+ * code, remove it. That is the whole job, and the page does nothing else.
  *
  * "Devices", not "Macs": the agent is macOS-only today, and the household
  * model is not — a second platform should not mean renaming this tab.
@@ -48,6 +49,10 @@ import {
  * The code sits in its device's own row, with Copy beside New code. It used
  * to be a banner at the top of the page — away from the device it belonged
  * to, and with nothing to copy it with.
+ *
+ * Remove is confirmed in place, the way homework removes a child: the row
+ * turns into the question and what will happen. It replaced Revoke and
+ * Decommission's typed-word forms (ADR 0011).
  */
 
 type Setup = Awaited<ReturnType<typeof getSetup>>;
@@ -65,10 +70,10 @@ export function ChildrenAndDevices() {
   const [cards, setCards] = useState<DeviceCard[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [codes, setCodes] = useState<Record<string, FreshCode>>({});
-  // ⚠️ Page-level, not in the row: a decommissioned device leaves the list on
-  // the very refresh that follows, taking any in-row "done" with it — seen on
-  // the first real decommission, which confirmed nothing on screen.
-  const [ended, setEnded] = useState<(EndedEnrolment & { device: string }) | null>(null);
+  // ⚠️ Page-level, not in the row: a removed device leaves the list on the
+  // very refresh that follows, taking any in-row "done" with it — seen on the
+  // first real decommission, which confirmed nothing on screen.
+  const [removed, setRemoved] = useState<{ device: string; status: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -142,9 +147,10 @@ export function ChildrenAndDevices() {
           await changed();
         })
       }
-      onChanged={(done) => {
-        setEnded({ ...done, device: device.label ?? "The device" });
-        void changed();
+      onRemove={async () => {
+        await removeDevice(device.id);
+        setRemoved({ device: device.label ?? "The device", status: device.status });
+        await changed();
       }}
     />
   );
@@ -153,11 +159,9 @@ export function ChildrenAndDevices() {
     <Page title={title} subtitle="Who is in the household, and the devices that enforce bedtime.">
       {error ? <ErrorNote error={error} /> : null}
 
-      {ended ? (
-        <Banner tone="ok" title={`${ended.label} done — ${ended.device}`}>
-          {ended.stopsEnforcement
-            ? "It uninstalls itself at its next check-in, usually within a minute. Its history is kept."
-            : "It keeps enforcing the rules it already has, but no longer talks to the server."}
+      {removed ? (
+        <Banner tone="ok" title={`Removed ${removed.device}`}>
+          {REMOVE_DEVICE.consequence(removed.status)}
         </Banner>
       ) : null}
 
@@ -204,15 +208,12 @@ export function ChildrenAndDevices() {
         }
       />
 
-      {/* ⚠️ A live device cannot be handed a fresh code — that would let a
-          second machine take over its identity while the first kept
-          enforcing with a credential nobody knows about. */}
-      <p className="text-xs text-muted-foreground">
-        A device that has already enrolled cannot be given a new code.
-        {retired > 0
-          ? ` ${retired} decommissioned ${retired === 1 ? "device is" : "devices are"} not shown; their history is kept.`
-          : ""}
-      </p>
+      {retired > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          {retired} removed {retired === 1 ? "device is" : "devices are"} not shown; their history
+          is kept.
+        </p>
+      ) : null}
     </Page>
   );
 }
@@ -290,7 +291,7 @@ function DeviceRow({
   fresh,
   busy,
   onNewCode,
-  onChanged,
+  onRemove,
 }: {
   device: SetupDevice;
   card: DeviceCard | undefined;
@@ -298,10 +299,53 @@ function DeviceRow({
   fresh: FreshCode | undefined;
   busy: boolean;
   onNewCode: () => void;
-  onChanged: (done: EndedEnrolment) => void;
+  onRemove: () => Promise<void>;
 }) {
+  const [confirming, setConfirming] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [error, setError] = useState<unknown>(null);
   const status = statusOf(device, card);
   const enrolled = device.status !== "pending";
+  const name = device.label ?? "this device";
+
+  if (confirming) {
+    return (
+      <li className="py-3">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-foreground">{REMOVE_DEVICE.question(name)}</p>
+              <p className="text-[13px] text-muted-foreground">
+                {REMOVE_DEVICE.consequence(device.status)}
+              </p>
+            </div>
+            <Button
+              variant="danger"
+              disabled={removing}
+              onClick={async () => {
+                setRemoving(true);
+                setError(null);
+                try {
+                  // The row leaves the list on the refresh that follows.
+                  await onRemove();
+                } catch (caught) {
+                  setError(caught);
+                  setRemoving(false);
+                }
+              }}
+            >
+              {removing ? "Removing…" : REMOVE_DEVICE.label}
+            </Button>
+            <Button variant="quiet" disabled={removing} onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+          </div>
+          {error ? <ErrorNote error={error} /> : null}
+        </div>
+      </li>
+    );
+  }
+
   return (
     <li className="py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -310,25 +354,22 @@ function DeviceRow({
         {card?.agent_version ? (
           <span className="text-[13px] text-muted-foreground">agent {card.agent_version}</span>
         ) : null}
-        {enrolled ? (
-          <Link
-            href={`/devices/${device.id}`}
-            className="ml-auto inline-flex min-h-11 items-center gap-0.5 text-[13px] text-muted-foreground hover:text-foreground"
-          >
-            Details <ChevronRight className="h-4 w-4" />
-          </Link>
-        ) : null}
+        <span className="ml-auto flex items-center gap-1">
+          {enrolled ? (
+            <Link
+              href={`/devices/${device.id}`}
+              className="inline-flex min-h-11 items-center gap-0.5 px-2 text-[13px] text-muted-foreground hover:text-foreground"
+            >
+              Details <ChevronRight className="h-4 w-4" />
+            </Link>
+          ) : null}
+          <Button variant="quiet" disabled={busy} onClick={() => setConfirming(true)}>
+            <Trash2 className="h-4 w-4" />
+            {REMOVE_DEVICE.label}
+          </Button>
+        </span>
       </div>
-      {enrolled ? (
-        <details className="mt-1">
-          <summary className="cursor-pointer text-[13px] text-muted-foreground hover:text-foreground">
-            Manage — revoke or decommission
-          </summary>
-          <div className="mt-2">
-            <DeviceDangerZone deviceId={device.id} onChanged={onChanged} />
-          </div>
-        </details>
-      ) : (
+      {enrolled ? null : (
         <EnrolmentCode
           label={device.label ?? "the Mac"}
           pending={pending}

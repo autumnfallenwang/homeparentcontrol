@@ -255,8 +255,8 @@ actually happened.
 
 ## When you are done
 
-**Decommission it in the UI** — Settings › Children & devices › the device ›
-**Manage** → type `DECOMMISSION`. At its next check-in (seconds to a minute)
+**Remove it in the UI** — Settings › Children & devices › **Remove** on the
+device's row, then **Remove** again to confirm. At its next check-in (seconds to a minute)
 the agent reports that it is leaving and removes itself: every job, plist and
 binary, the installer receipt and its credential. Its history stays on the
 server. Verified on real hardware 2026-09-28: all four jobs gone 20 s after

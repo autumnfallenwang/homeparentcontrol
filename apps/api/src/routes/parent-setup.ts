@@ -126,7 +126,7 @@ export async function handleReissueCode(c: Context<{ Variables: ParentVariables 
     return fail(
       c,
       409,
-      `this device is ${device.status}; revoke it first if you need to re-enrol it`,
+      `this device is ${device.status}; remove it and add it again to set it up afresh`,
     );
   }
 

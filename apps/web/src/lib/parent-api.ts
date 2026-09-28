@@ -1,4 +1,4 @@
-import type { HealthState, TripwireSeverity } from "@hpc/contract";
+import { type HealthState, REMOVE_DEVICE, type TripwireSeverity } from "@hpc/contract";
 import { apiBaseUrl } from "./api.js";
 
 /**
@@ -187,12 +187,14 @@ export const attendDevice = (id: string) =>
 export const setAway = (id: string, until: string) =>
   post<{ away_until: string }>(`/devices/${id}/away`, { until });
 
-export const revokeDevice = (id: string, confirm: string) =>
-  post<{ status: string; stops_enforcement: boolean }>(`/devices/${id}/revoke`, { confirm });
-
-export const decommissionDevice = (id: string, confirm: string) =>
+/**
+ * Remove a device — §5.5's Decommission, the only way the UI ends one. The
+ * confirmation happens in place, before this is called; the server still
+ * checks its word.
+ */
+export const removeDevice = (id: string) =>
   post<{ status: string; stops_enforcement: boolean }>(`/devices/${id}/decommission`, {
-    confirm,
+    confirm: REMOVE_DEVICE.confirmWord,
   });
 
 // ── Overrides

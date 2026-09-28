@@ -1,4 +1,4 @@
-import { and, desc, eq, gte } from "drizzle-orm";
+import { and, desc, eq, gte, isNull } from "drizzle-orm";
 import type { Context } from "hono";
 import { z } from "zod";
 import { db } from "../db/index.js";
@@ -9,6 +9,7 @@ import {
   desiredItems,
   devices,
   enforcementLog,
+  enrollments,
   sessionSpans,
   tripwires,
 } from "../db/schema.js";
@@ -386,6 +387,13 @@ async function endCredential(
         ...(opts.keepCredential ? {} : { previousApiKeyId: null, previousApiKeyExpiresAt: null }),
       })
       .where(eq(devices.id, device.id));
+
+    // ★ And its unused setup code dies with it. The claim never looks at the
+    // device's status, so a removed device that was never set up came back
+    // as `enrolled` the moment anyone pasted its old install command.
+    await tx
+      .delete(enrollments)
+      .where(and(eq(enrollments.deviceId, device.id), isNull(enrollments.consumedAt)));
 
     if (opts.dropDesired) {
       // "every `desired_items` row dropped" — nothing should hand a retired

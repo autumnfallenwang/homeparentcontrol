@@ -155,34 +155,38 @@ export function grantWillApplyWhenReconnected(subject: Subject, silentFor: strin
   );
 }
 
-// ── 3. Revoke vs Decommission (§5.5).
+// ── 3. Removing a device (§5.5).
 
-export interface DestructiveAction {
-  label: string;
-  /** What it actually does, in the spec's own words. */
-  description: string;
-  /** When to use it. */
-  useWhen: string;
-  /** ⚠️ Both are typed-confirmation actions. */
-  confirmWord: string;
-  stopsEnforcement: boolean;
-}
-
-export const REVOKE: DestructiveAction = {
-  label: "Revoke credential",
-  description: "The Mac stops talking to the server but keeps enforcing bedtime.",
-  useWhen: "Use this if you think the credential leaked.",
-  confirmWord: "REVOKE",
-  stopsEnforcement: false,
-};
-
-export const DECOMMISSION: DestructiveAction = {
-  label: "Decommission device",
-  description: "The agent uninstalls itself and stops enforcing anything.",
-  useWhen: "Use this when the Mac is leaving the house.",
+/**
+ * ★ The parent UI has ONE way to end a device: Remove, which is §5.5's
+ * Decommission. Revoke stays an API endpoint with no button, and the typed
+ * confirm word became a confirmation in place (ADR 0011) — a household adds
+ * a child, adds a device, sets it up, and removes it; that is the whole job.
+ *
+ * ⚠️ The sentence still has to be TRUE for the device in front of the
+ * parent, which is why it depends on the device's status: only a device that
+ * can still hear the server can be told to uninstall.
+ */
+export const REMOVE_DEVICE = {
+  label: "Remove",
+  /** The word the server checks. The UI sends it once Remove is confirmed. */
   confirmWord: "DECOMMISSION",
-  stopsEnforcement: true,
-};
+  question(device: string): string {
+    return `Remove ${device}?`;
+  },
+  /** Shown in the confirmation, and again once it is done. */
+  consequence(status: string): string {
+    if (status === "enrolled" || status === "active") {
+      return "Its agent uninstalls itself at its next check-in and stops enforcing bedtime. Its history is kept.";
+    }
+    if (status === "revoked") {
+      // Its credential is already dead, so the `410` that uninstalls an agent
+      // can never reach it.
+      return "It was already cut off, so it cannot be told to uninstall: its agent keeps enforcing its last rules until it is removed on the Mac itself.";
+    }
+    return "Its setup code stops working.";
+  },
+} as const;
 
 // ── 4. The `active_s` label (§5.8).
 

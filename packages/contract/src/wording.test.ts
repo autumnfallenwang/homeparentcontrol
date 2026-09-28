@@ -2,13 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   ACTIVE_TIME_EXPLANATION,
   ACTIVE_TIME_LABEL,
-  DECOMMISSION,
   grantWillApplyWhenReconnected,
   type HealthState,
   healthPhrasing,
   LATE_GRANT_DOES_NOT_UNLOCK,
   lateGrantDoesNotUnlock,
-  REVOKE,
+  REMOVE_DEVICE,
   shadowModeNotEnforcing,
 } from "./wording.js";
 
@@ -125,31 +124,35 @@ describe("2. the no-unlock sentence (§3.5)", () => {
   });
 });
 
-describe("3. Revoke vs Decommission (§5.5)", () => {
-  // ★ They look alike and behave oppositely.
-  it("★ Revoke keeps enforcing; Decommission stops everything", () => {
-    expect(REVOKE.stopsEnforcement).toBe(false);
-    expect(REVOKE.description).toContain("keeps enforcing bedtime");
-
-    expect(DECOMMISSION.stopsEnforcement).toBe(true);
-    expect(DECOMMISSION.description).toContain("stops enforcing anything");
+describe("3. Removing a device (§5.5)", () => {
+  it("★ a set-up device is told, before and after, that enforcement stops", () => {
+    for (const status of ["enrolled", "active"]) {
+      const text = REMOVE_DEVICE.consequence(status);
+      expect(text).toContain("uninstalls itself");
+      expect(text).toContain("stops enforcing bedtime");
+      expect(text).toContain("history is kept");
+    }
   });
 
-  it("each says when to use it, because the labels alone do not", () => {
-    expect(REVOKE.useWhen).toContain("credential leaked");
-    expect(DECOMMISSION.useWhen).toContain("leaving the house");
+  // ⚠️ A confirmation that claims the wrong outcome is worse than none: a
+  // revoked device cannot hear the answer that uninstalls it.
+  it("★ a revoked device is NOT promised an uninstall", () => {
+    const text = REMOVE_DEVICE.consequence("revoked");
+    expect(text).not.toContain("uninstalls itself");
+    expect(text).toContain("keeps enforcing");
   });
 
-  // ⚠️ "the UI must make these typed-confirmation actions".
-  it("★ both are typed-confirmation actions", () => {
-    expect(REVOKE.confirmWord).toBe("REVOKE");
-    expect(DECOMMISSION.confirmWord).toBe("DECOMMISSION");
+  it("a device never set up only loses its code", () => {
+    expect(REMOVE_DEVICE.consequence("pending")).toBe("Its setup code stops working.");
   });
 
-  it("the two confirm words are not interchangeable", () => {
-    // Typing one must not satisfy the other; that is the entire point of
-    // making them typed.
-    expect(REVOKE.confirmWord).not.toBe(DECOMMISSION.confirmWord);
+  it("asks about the device by name", () => {
+    expect(REMOVE_DEVICE.question("Lucy's Mac")).toBe("Remove Lucy's Mac?");
+  });
+
+  // The server still checks a word; it is the Decommission endpoint's.
+  it("sends the word the decommission endpoint checks", () => {
+    expect(REMOVE_DEVICE.confirmWord).toBe("DECOMMISSION");
   });
 });
 

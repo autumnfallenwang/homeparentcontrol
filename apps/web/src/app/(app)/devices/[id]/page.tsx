@@ -144,7 +144,7 @@ export default function DevicePage() {
         <EnforcementCard detail={detail} />
         <TripwiresCard detail={detail} />
         <p className="text-sm text-muted-foreground">
-          To revoke or decommission this Mac, go to{" "}
+          To remove this Mac, go to{" "}
           <Link href="/settings/children" className="underline">
             Settings › Children &amp; devices
           </Link>

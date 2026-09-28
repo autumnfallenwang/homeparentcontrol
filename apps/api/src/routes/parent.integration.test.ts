@@ -489,6 +489,34 @@ d("Revoke vs Decommission (§5.5)", () => {
     expect(sync.body.hpc_action).toBe("decommission");
   });
 
+  // ★ The claim never checks the device's status, so a removed device that
+  // was never set up came back as `enrolled` when its old command was pasted.
+  it("★ removing a device that was never set up kills its setup code", async () => {
+    const f = await seed();
+    const created = (await (
+      await send("/devices", f, "POST", { child_id: f.childId, label: "Spare Mac" })
+    ).json()) as { device_id: string; code: string };
+    const removed = await send(`/devices/${created.device_id}/decommission`, f, "POST", {
+      confirm: "DECOMMISSION",
+    });
+    expect(removed.status).toBe(200);
+
+    const claim = await app.request("/api/agent/v1/enroll", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        code: created.code,
+        hardware_uuid: "0F1E2D3C-4B5A-6978-8796-A5B4C3D2E1F0",
+      }),
+    });
+    expect(claim.status).toBe(404);
+    const [device] = await db
+      .select({ status: devices.status })
+      .from(devices)
+      .where(eq(devices.id, created.device_id));
+    expect(device?.status).toBe("decommissioned");
+  });
+
   it("revoke's next check-in is NOT told to uninstall — it keeps enforcing", async () => {
     const f = await seed();
     await send(`/devices/${f.deviceId}/revoke`, f, "POST", { confirm: "REVOKE" });

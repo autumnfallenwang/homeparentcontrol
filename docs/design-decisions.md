@@ -1622,6 +1622,10 @@ flipped in one line.
   documented upgrade is one installer flag, `--pin-key sha256:…`, compared against the received key
   before anything is written. **Put it in the runbook even if it is never used.**
 
+> ⚠️ **Amended by [ADR 0011](adr/0011-one-remove-action.md) (2026-09-28):** the UI now offers one
+> action, **Remove** (= Decommission), confirmed in place. Revoke is API-only. The text below is the
+> original spec.
+
 **Decommission vs Revoke** — the UI must make these typed-confirmation actions and must say what each
 does, because they look similar and behave oppositely:
 
