@@ -3,6 +3,7 @@
 # anything about the install would make it fail silently.
 #
 #   sudo agent/scripts/install.sh [pkg] --base-url <url> [--code HPC-…] [--allow-dev]
+#   sudo agent/scripts/install.sh --safe --base-url <url> --code HPC-…
 #
 #   sudo agent/scripts/install.sh \
 #     --base-url http://homeparentcontrol-api.arch.internal/api/agent/v1/ \
@@ -13,7 +14,9 @@
 # looks for both every tick, so there is nothing to restart afterwards.
 #
 # With no argument it builds one from the working tree (release, WITHOUT
-# -DDEV_ENFORCEMENT) and installs that.
+# -DDEV_ENFORCEMENT) and installs that. `--safe` builds the SAFE variant
+# instead — the real power-off replaced by a log line — and says so; it is the
+# one flag the parent UI's "Copy install command" adds for a first install.
 #
 # ⚠️ A pkg built with `build-pkg.sh <v> --dev` has the real power-off
 # replaced by a log line. It is right for a first smoke test and wrong for
@@ -35,11 +38,14 @@ cd "$(dirname "$0")/../.."
 ROOT="$PWD"
 PKG=""
 ALLOW_DEV=0
+WANT_SAFE=0
 BASE_URL=""
 CODE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --allow-dev) ALLOW_DEV=1 ;;
+    # Asking for the safe variant by name IS the consent --allow-dev exists for.
+    --safe) WANT_SAFE=1; ALLOW_DEV=1 ;;
     --base-url) BASE_URL="${2:?--base-url needs a URL}"; shift ;;
     --code) CODE="${2:?--code needs an enrolment code}"; shift ;;
     -*) echo "ERROR: unknown option $1" >&2; exit 1 ;;
@@ -63,12 +69,18 @@ if [ -z "$PKG" ]; then
   VERSION="$(sed -n 's/.*static let base = "\(.*\)"/\1/p' \
     agent/Sources/HPCAgentIO/AgentVersion.swift | head -1)"
   [ -n "$VERSION" ] || { echo "ERROR: could not read the agent version" >&2; exit 1; }
-  echo "── building $VERSION"
-  # ⚠️ NOT -DDEV_ENFORCEMENT. The V-series builds the safe variant; a real
-  # install must contain the real shutdown. Getting this backwards produces
-  # an agent that logs "would shut down" for ever and looks fine.
-  bash agent/scripts/build-pkg.sh "$VERSION" >/dev/null
-  PKG="$ROOT/agent/.build/pkg/homeparentcontrol-$VERSION.pkg"
+  if [ "$WANT_SAFE" -eq 1 ]; then
+    echo "── building $VERSION (SAFE variant — never powers the Mac off)"
+    bash agent/scripts/build-pkg.sh "$VERSION" --dev >/dev/null
+    PKG="$ROOT/agent/.build/pkg/homeparentcontrol-$VERSION-dev.pkg"
+  else
+    echo "── building $VERSION"
+    # ⚠️ NOT -DDEV_ENFORCEMENT unless --safe asked for it. A real install must
+    # contain the real shutdown. Getting this backwards produces an agent that
+    # logs "would shut down" for ever and looks fine.
+    bash agent/scripts/build-pkg.sh "$VERSION" >/dev/null
+    PKG="$ROOT/agent/.build/pkg/homeparentcontrol-$VERSION.pkg"
+  fi
 fi
 
 [ -f "$PKG" ] || { echo "ERROR: $PKG not found" >&2; exit 1; }
@@ -118,6 +130,12 @@ if [ "$SAFE" -ne "$NAMED_SAFE" ]; then
   echo "  One of the two is lying about whether this build can power the Mac off." >&2
   exit 1
 fi
+# --safe promised the safe variant; a full pkg handed in beside it breaks that.
+if [ "$WANT_SAFE" -eq 1 ] && [ "$SAFE" -ne 1 ]; then
+  echo "ERROR: --safe was asked for, but $(basename "$PKG") is the FULL build ($REPORTED)." >&2
+  echo "  It powers the Mac off at bedtime. Drop --safe, or pass the -dev pkg." >&2
+  exit 1
+fi
 if [ "$SAFE" -eq 1 ]; then
   if [ "$ALLOW_DEV" -ne 1 ]; then
     echo "ERROR: $(basename "$PKG") is the SAFE VARIANT ($REPORTED) — shutdown is a log line." >&2
@@ -145,13 +163,19 @@ fi
 # ⚠️ Enable it in System Settings, not with `systemsetup -setremotelogin on`:
 # that needs Full Disk Access for the terminal even under sudo, and fails with
 # a message about privileges that reads like a sudo problem.
-REMOTE="$(systemsetup -getremotelogin 2>&1 || true)"
-if ! printf '%s' "$REMOTE" | grep -qi "remote login: on"; then
+#
+# ⚠️ And READ it with launchd, not `systemsetup -getremotelogin`, for the same
+# reason: without Full Disk Access that prints "You need administrator
+# access…" even under sudo, which this check read as "off" — so the full build
+# was refused on a Mac whose Remote Login was plainly on. launchd's own
+# enable flag needs no special access (probed on macOS 26.6).
+REMOTE="$(launchctl print-disabled system 2>/dev/null | awk -F'=> ' '/"com.openssh.sshd"/ {print $2}')"
+if [ "${REMOTE:-}" != "enabled" ]; then
   if [ "$SAFE" -eq 1 ]; then
-    echo "⚠️  Remote Login is not on (${REMOTE:-no answer}). Allowed for the safe variant;"
+    echo "⚠️  Remote Login is not on (${REMOTE:-not set}). Allowed for the safe variant;"
     echo "   you will want it to get back in while the screen is locked."
   else
-    echo "ERROR: Remote Login is not on (${REMOTE:-no answer})." >&2
+    echo "ERROR: Remote Login is not on (${REMOTE:-not set})." >&2
     echo "  Under 'shutdown' there is no remote recovery path at all — you cannot" >&2
     echo "  SSH into a machine that is powered off. Enable it first:" >&2
     echo "    System Settings → General → Sharing → Remote Login" >&2

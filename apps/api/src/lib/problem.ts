@@ -59,6 +59,12 @@ export const PROBLEMS = {
     title: "Enrolment code already used",
   },
   enrolInvalid: { slug: "enrolment-invalid", status: 400, title: "Malformed enrolment request" },
+  // One Mac, one registration: its hardware already belongs to a live device.
+  deviceAlreadyRegistered: {
+    slug: "device-already-registered",
+    status: 409,
+    title: "This Mac is already set up",
+  },
 
   // ── Authenticated agent routes.
   unauthorized: { slug: "device-unauthorized", status: 401, title: "Device credential rejected" },
@@ -101,6 +107,7 @@ export const PRE_CREDENTIAL_PROBLEMS = [
   "enrolCodeExpired",
   "enrolCodeConsumed",
   "enrolInvalid",
+  "deviceAlreadyRegistered",
 ] as const satisfies readonly ProblemKey[];
 
 const preCredential = new Set<ProblemKey>(PRE_CREDENTIAL_PROBLEMS);

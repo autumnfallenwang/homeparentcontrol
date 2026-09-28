@@ -313,3 +313,87 @@ d("POST /enroll — the wire contract", () => {
     expect(body.instance).toBe("/api/agent/v1/enroll");
   });
 });
+
+d("one Mac, one registration", () => {
+  /** A second device in the same household, with its own unused code. */
+  async function secondDevice(
+    f: Fixture,
+    label: string,
+  ): Promise<{ deviceId: string; code: string }> {
+    const [first] = await db
+      .select({ childId: devices.childId, policySetId: devices.policySetId })
+      .from(devices)
+      .where(eq(devices.id, f.deviceId));
+    if (!first) throw new Error("seed() made no device");
+    const deviceId = randomUUID();
+    await db.insert(devices).values({
+      id: deviceId,
+      householdId: f.householdId,
+      childId: first.childId,
+      policySetId: first.policySetId,
+      label,
+    });
+    const code = generateEnrolmentCode();
+    await db.insert(enrollments).values({
+      householdId: f.householdId,
+      deviceId,
+      codeHash: hashEnrolmentCode(code),
+      codeHint: enrolmentCodeHint(code),
+      expiresAt: new Date(Date.now() + 60 * 60_000),
+    });
+    return { deviceId, code };
+  }
+
+  it("★ refuses to register a Mac that is already set up as another device", async () => {
+    const f = await seed();
+    expect((await enrol({ code: f.code, hardware_uuid: HARDWARE })).status).toBe(201);
+
+    const again = await secondDevice(f, "Lucy's Mac, again");
+    const res = await enrol({ code: again.code, hardware_uuid: HARDWARE });
+    expect(res.status).toBe(409);
+    const problem = (await res.json()) as { type: string; detail?: string; hpc_action?: string };
+    expect(problem.type).toContain("device-already-registered");
+    expect(problem.detail).toContain("Lucy's Mac mini");
+    // Pre-credential: never an instruction to the agent.
+    expect(problem.hpc_action).toBeUndefined();
+
+    const [second] = await db.select().from(devices).where(eq(devices.id, again.deviceId));
+    expect(second?.status).toBe("pending");
+    expect(second?.apiKeyId).toBeNull();
+    // The refusal rolled the claim back: the code is still usable later.
+    const [row] = await db
+      .select()
+      .from(enrollments)
+      .where(eq(enrollments.deviceId, again.deviceId));
+    expect(row?.consumedAt).toBeNull();
+  });
+
+  it("frees the Mac once its registration is decommissioned — and the same code then works", async () => {
+    const f = await seed();
+    await enrol({ code: f.code, hardware_uuid: HARDWARE });
+    const again = await secondDevice(f, "Lucy's Mac, again");
+    expect((await enrol({ code: again.code, hardware_uuid: HARDWARE })).status).toBe(409);
+
+    await db.update(devices).set({ status: "decommissioned" }).where(eq(devices.id, f.deviceId));
+    expect((await enrol({ code: again.code, hardware_uuid: HARDWARE })).status).toBe(201);
+  });
+
+  it("a revoked registration does not hold the Mac either", async () => {
+    const f = await seed();
+    await enrol({ code: f.code, hardware_uuid: HARDWARE });
+    await db.update(devices).set({ status: "revoked" }).where(eq(devices.id, f.deviceId));
+    const again = await secondDevice(f, "Lucy's Mac, again");
+    expect((await enrol({ code: again.code, hardware_uuid: HARDWARE })).status).toBe(201);
+  });
+
+  it("a different Mac is unaffected", async () => {
+    const f = await seed();
+    await enrol({ code: f.code, hardware_uuid: HARDWARE });
+    const other = await secondDevice(f, "Max's Air");
+    const res = await enrol({
+      code: other.code,
+      hardware_uuid: "11111111-2222-3333-4444-555555555555",
+    });
+    expect(res.status).toBe(201);
+  });
+});

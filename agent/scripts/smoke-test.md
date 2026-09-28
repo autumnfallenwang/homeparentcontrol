@@ -99,6 +99,20 @@ stores it, and the 60 minutes start now.
 
 ## 4. Install and enrol — one command
 
+**The easy way:** the new device's row in Settings › Children & devices shows
+the steps and a **Copy command** button, with the code and server address
+already filled in. Pick **Safe** or **Full** there, paste it in Terminal in this
+folder on the Mac, and type the Mac's password. `--safe` builds the safe
+variant from source and installs it in one go — no separate `build-pkg.sh`.
+
+```sh
+sudo agent/scripts/install.sh --safe \
+  --base-url http://homeparentcontrol-api.arch.internal/api/agent/v1/ \
+  --code HPC-XXXX-XXXX-XXXX
+```
+
+The same thing with a package you built yourself:
+
 ```sh
 sudo agent/scripts/install.sh \
   agent/.build/pkg/homeparentcontrol-0.1.0-dev.pkg --allow-dev \

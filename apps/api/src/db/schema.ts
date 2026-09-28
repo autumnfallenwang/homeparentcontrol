@@ -250,7 +250,8 @@ export const devices = pgTable(
     index("devices_household_id_idx").on(t.householdId),
     index("devices_child_id_idx").on(t.childId),
     // Not globally unique — a decommissioned device keeps its hardwareUuid so a replacement can be
-    // recognised. Uniqueness is enforced in the enrol handler against the live statuses.
+    // recognised. Uniqueness among LIVE registrations (enrolled, active) is enforced in the enrol
+    // handler (`deviceAlreadyRegistered`).
     index("devices_hardware_uuid_idx").on(t.hardwareUuid),
   ],
 );

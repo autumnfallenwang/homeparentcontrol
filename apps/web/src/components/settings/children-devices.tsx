@@ -3,7 +3,9 @@
 import { Check, ChevronRight, Copy, Plus } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { apiBaseUrl } from "../../lib/api.js";
 import { copyText } from "../../lib/clipboard.js";
+import { installCommand } from "../../lib/install-command.js";
 import {
   createChild,
   createDevice,
@@ -25,6 +27,7 @@ import {
   ErrorNote,
   Field,
   inputClass,
+  SegmentedControl,
   Spinner,
   type Tone,
 } from "../ui.js";
@@ -83,6 +86,19 @@ export function ChildrenAndDevices() {
   const changed = useCallback(async () => {
     await Promise.all([refresh(), viewing.refresh()]);
   }, [refresh, viewing.refresh]);
+
+  // While a device is waiting to be set up — or has enrolled but not yet been
+  // seen checking in — keep looking: the parent is at the other Mac pasting
+  // the command, and this page should reach "checking in" on its own rather
+  // than after a reload nobody thinks to do.
+  const waiting =
+    (setup?.devices.some((device) => device.status === "pending") ?? false) ||
+    cards.some(awaitingFirstCheckIn);
+  useEffect(() => {
+    if (!waiting) return;
+    const interval = setInterval(() => void changed(), 15_000);
+    return () => clearInterval(interval);
+  }, [waiting, changed]);
 
   async function run(step: () => Promise<void>) {
     setBusy(true);
@@ -328,12 +344,16 @@ function EnrolmentCode({
   busy: boolean;
   onNewCode: () => void;
 }) {
-  const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
+  const [copied, setCopied] = useState<"code" | "command" | "failed" | null>(null);
+  const [build, setBuild] = useState<"safe" | "full">("safe");
   const expired = fresh ? new Date(fresh.expires_at) <= new Date() : Boolean(pending?.expired);
+  const live = fresh && !expired ? fresh : null;
+  const command = live
+    ? installCommand({ apiOrigin: apiBaseUrl(), code: live.code, safe: build === "safe" })
+    : null;
 
-  const copy = async () => {
-    if (!fresh) return;
-    setCopied((await copyText(fresh.code)) ? "yes" : "failed");
+  const copy = async (what: "code" | "command", text: string) => {
+    setCopied((await copyText(text)) ? what : "failed");
     setTimeout(() => setCopied(null), 2500);
   };
 
@@ -351,14 +371,10 @@ function EnrolmentCode({
         )}
         {expired ? <Badge tone="warn">expired</Badge> : null}
         <span className="ml-auto flex items-center gap-2">
-          {fresh && !expired ? (
-            <Button onClick={copy}>
-              {copied === "yes" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-              {copied === "yes"
-                ? "Copied"
-                : copied === "failed"
-                  ? "Select it instead"
-                  : "Copy code"}
+          {live ? (
+            <Button onClick={() => copy("code", live.code)}>
+              {copied === "code" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {copied === "code" ? "Copied" : "Copy code"}
             </Button>
           ) : null}
           <Button variant="quiet" disabled={busy} onClick={onNewCode}>
@@ -368,12 +384,65 @@ function EnrolmentCode({
       </div>
       {/* ★ Once. Nothing stores it — so say what to do when it is gone. */}
       <p className="mt-1 text-xs text-muted-foreground">
-        {fresh && !expired
-          ? `Type it into the installer on ${label}. Shown only here, only now — it expires ${new Date(
-              fresh.expires_at,
-            ).toLocaleTimeString()}.`
-          : "The full code is shown only when it is made. Get a new code to copy it."}
+        {live
+          ? `Shown only here, only now — it expires ${new Date(live.expires_at).toLocaleTimeString()}.`
+          : "The full code is shown only when it is made. Get a new code to set this Mac up."}
       </p>
+
+      {live && command ? (
+        <div className="mt-3 border-t border-border pt-3 text-sm">
+          <p className="font-medium text-foreground">Set up {label}</p>
+          <ol className="mt-2 list-decimal space-y-3 pl-5 text-foreground/85">
+            <li>
+              On that Mac, turn on <span className="font-medium">Remote Login</span> — System
+              Settings › General › Sharing. It is how you get back in while the screen is locked,
+              and the Full build refuses to install without it.
+            </li>
+            <li>
+              <p>
+                Open Terminal in the{" "}
+                <span className="font-mono text-[13px]">homeparentcontrol</span> folder (a copy of
+                this project on that Mac, with Apple's command-line tools:{" "}
+                <span className="font-mono text-[13px]">xcode-select --install</span>). Paste this
+                and type the Mac's password when asked:
+              </p>
+              <div className="mt-2 max-w-md">
+                <SegmentedControl
+                  label="Build"
+                  value={build}
+                  options={[
+                    { value: "safe", label: "Safe — never powers off" },
+                    { value: "full", label: "Full — powers off at bedtime" },
+                  ]}
+                  onChange={setBuild}
+                />
+              </div>
+              <div className="mt-2 flex flex-wrap items-start gap-2">
+                <code className="min-w-0 flex-1 select-all break-all rounded-md border border-border bg-card px-3 py-2 font-mono text-[12px] text-foreground">
+                  {command}
+                </code>
+                <Button onClick={() => copy("command", command)}>
+                  {copied === "command" ? (
+                    <Check className="h-4 w-4" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                  {copied === "command" ? "Copied" : "Copy command"}
+                </Button>
+              </div>
+              {copied === "failed" ? (
+                <p className="mt-1 text-xs text-destructive">
+                  Could not copy — select the text and copy it by hand.
+                </p>
+              ) : null}
+            </li>
+            <li>
+              Come back here. {label} shows <span className="font-medium">checking in</span> by
+              itself within a couple of minutes.
+            </li>
+          </ol>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -389,6 +458,9 @@ function statusOf(
   if (device.status === "pending") return { tone: "warn", label: "not set up yet" };
   if (device.status === "revoked") return { tone: "alarm", label: "revoked" };
   if (!card) return { tone: "plain", label: device.status };
+  // ⚠️ Enrolled seconds ago, health not computed yet: the raw state reads
+  // "unenrolled" — the opposite of what just happened. Seen on the first walk.
+  if (awaitingFirstCheckIn(card)) return { tone: "info", label: "waiting for first check-in" };
   if (card.shadow_mode) return { tone: "alarm", label: "not enforcing (soak)" };
   return { tone: cardPhrasing(card).tone as Tone, label: stateLabel(card.health.state) };
 }
@@ -419,4 +491,9 @@ function AddChild({ busy, onAdd }: { busy: boolean; onAdd: (name: string) => Pro
       </div>
     </Card>
   );
+}
+
+/** Enrolled, but the server has not yet seen it check in (health lags a minute). */
+function awaitingFirstCheckIn(card: DeviceCard): boolean {
+  return card.status !== "pending" && card.health.state === "UNENROLLED";
 }

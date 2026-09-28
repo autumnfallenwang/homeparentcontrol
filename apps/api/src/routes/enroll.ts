@@ -1,5 +1,5 @@
 import { type EnrolmentResponse, enrolmentRequest } from "@hpc/contract";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { apikeys, devices, enrollments, households, tripwires } from "../db/schema.js";
@@ -122,6 +122,12 @@ enrolApp.post("/", async (c) => {
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+/**
+ * Registrations that still own their Mac. `revoked` does not: the parent has
+ * cut that credential off, and setting the Mac up again is the way back.
+ */
+const LIVE_STATUSES = ["enrolled", "active"];
+
 interface IssueBody {
   hardware_uuid: string;
   hostname?: string;
@@ -221,6 +227,36 @@ async function issue(
     .from(devices)
     .where(eq(devices.id, deviceId));
   if (!device) throw new ProblemError("enrolCodeUnknown", "the device for this code is gone");
+
+  // ★ One Mac, one registration. A Mac's agent holds ONE credential and obeys
+  // ONE policy, so a second registration silently takes the agent over: the
+  // first device goes quiet and raises a false "not checking in" alarm, and
+  // two children's rules now claim one machine. Refused while the other
+  // registration is live; revoking or decommissioning it frees the Mac.
+  //
+  // ⚠️ The schema comment said this was already enforced here. It was not —
+  // found while designing the deploy-from-scan flow, where a registered Mac
+  // must not be offered for setup again.
+  //
+  // Inside the claim transaction on purpose: the refusal rolls the claim back,
+  // so the same code works once the other registration is removed.
+  const [holder] = await tx
+    .select({ id: devices.id, label: devices.label })
+    .from(devices)
+    .where(
+      and(
+        eq(devices.hardwareUuid, body.hardware_uuid),
+        ne(devices.id, deviceId),
+        inArray(devices.status, LIVE_STATUSES),
+      ),
+    )
+    .limit(1);
+  if (holder) {
+    throw new ProblemError(
+      "deviceAlreadyRegistered",
+      `this Mac is already set up as ${holder.label ?? "another device"}`,
+    );
+  }
 
   const [household] = await tx
     .select({ serviceUserId: households.serviceUserId })
