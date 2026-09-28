@@ -1,8 +1,7 @@
 "use client";
 
 import { REMOVE_CHILD, REMOVE_DEVICE } from "@hpc/contract";
-import { Check, ChevronRight, Copy, Plus, Trash2 } from "lucide-react";
-import Link from "next/link";
+import { Check, Copy, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { apiBaseUrl } from "../../lib/api.js";
 import { copyText } from "../../lib/clipboard.js";
@@ -368,14 +367,6 @@ function DeviceRow({
           <span className="text-[13px] text-muted-foreground">agent {card.agent_version}</span>
         ) : null}
         <span className="ml-auto flex items-center gap-1">
-          {enrolled ? (
-            <Link
-              href={`/devices/${device.id}`}
-              className="inline-flex min-h-11 items-center gap-0.5 px-2 text-[13px] text-muted-foreground hover:text-foreground"
-            >
-              Details <ChevronRight className="h-4 w-4" />
-            </Link>
-          ) : null}
           <Button variant="quiet" disabled={busy} onClick={() => setConfirming(true)}>
             <Trash2 className="h-4 w-4" />
             {REMOVE_DEVICE.label}

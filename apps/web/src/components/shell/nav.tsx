@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   BarChart3,
   CircleAlert,
+  Database,
   Home,
   LogOut,
   MoonStar,
@@ -50,6 +51,7 @@ const SETTINGS_ITEM: NavItem = { href: "/settings", label: "Settings", icon: Set
 
 export const SETTINGS_TABS = [
   { key: "children", label: "Children & devices", icon: Users },
+  { key: "usage", label: "Usage data", icon: Database },
   { key: "appearance", label: "Appearance", icon: Palette },
 ] as const;
 

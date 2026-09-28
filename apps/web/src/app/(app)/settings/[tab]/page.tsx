@@ -3,6 +3,7 @@
 import { notFound, useParams } from "next/navigation";
 import { AppearanceSettings } from "../../../../components/settings/appearance.js";
 import { ChildrenAndDevices } from "../../../../components/settings/children-devices.js";
+import { UsageDataSettings } from "../../../../components/settings/usage-data.js";
 import { isSettingsTab } from "../../../../components/shell/nav.js";
 
 /**
@@ -13,5 +14,7 @@ import { isSettingsTab } from "../../../../components/shell/nav.js";
 export default function SettingsTabPage() {
   const { tab } = useParams<{ tab: string }>();
   if (!isSettingsTab(tab)) notFound();
-  return tab === "children" ? <ChildrenAndDevices /> : <AppearanceSettings />;
+  if (tab === "children") return <ChildrenAndDevices />;
+  if (tab === "usage") return <UsageDataSettings />;
+  return <AppearanceSettings />;
 }
