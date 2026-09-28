@@ -1,8 +1,9 @@
 "use client";
 
-import { ChevronRight, Plus } from "lucide-react";
+import { Check, ChevronRight, Copy, Plus } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { copyText } from "../../lib/clipboard.js";
 import {
   createChild,
   createDevice,
@@ -40,13 +41,17 @@ import {
  * four-character hint, so "which code was that?" is answerable and "what was
  * the code?" is not. The page says so, because a parent who assumes they can
  * come back for it will close this tab.
+ *
+ * The code sits in its device's own row, with Copy beside New code. It used
+ * to be a banner at the top of the page — away from the device it belonged
+ * to, and with nothing to copy it with.
  */
 
 type Setup = Awaited<ReturnType<typeof getSetup>>;
 type SetupDevice = Setup["devices"][number];
 
+/** A code this page just made — the only place the full code ever exists. */
 interface FreshCode {
-  label: string;
   code: string;
   expires_at: string;
 }
@@ -56,7 +61,7 @@ export function ChildrenAndDevices() {
   const [setup, setSetup] = useState<Setup | null>(null);
   const [cards, setCards] = useState<DeviceCard[]>([]);
   const [error, setError] = useState<unknown>(null);
-  const [freshCode, setFreshCode] = useState<FreshCode | null>(null);
+  const [codes, setCodes] = useState<Record<string, FreshCode>>({});
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -108,11 +113,12 @@ export function ChildrenAndDevices() {
       device={device}
       card={cards.find((card) => card.device_id === device.id)}
       pending={setup.pending_codes.find((row) => row.device_id === device.id)}
+      fresh={codes[device.id]}
       busy={busy}
       onNewCode={() =>
         run(async () => {
           const issued = await reissueCode(device.id);
-          setFreshCode({ label: device.label ?? "the Mac", ...issued });
+          setCodes((current) => ({ ...current, [device.id]: issued }));
           await changed();
         })
       }
@@ -123,19 +129,6 @@ export function ChildrenAndDevices() {
   return (
     <Page title={title} subtitle="Who is in the household, and the devices that enforce bedtime.">
       {error ? <ErrorNote error={error} /> : null}
-
-      {freshCode ? (
-        <Banner tone="ok" title={`Type this into the installer on ${freshCode.label}`}>
-          <p className="my-2 select-all font-mono text-2xl tracking-wider text-foreground">
-            {freshCode.code}
-          </p>
-          {/* ★ Once. Nothing stores it. */}
-          <p>
-            This is the only time it is shown — nothing stores it. It expires{" "}
-            {new Date(freshCode.expires_at).toLocaleTimeString()}.
-          </p>
-        </Banner>
-      ) : null}
 
       {setup.children.length === 0 ? (
         <Banner tone="info" title="No children yet">
@@ -151,7 +144,10 @@ export function ChildrenAndDevices() {
           onAddDevice={(label) =>
             run(async () => {
               const created = await createDevice({ child_id: child.id, label });
-              setFreshCode({ label, code: created.code, expires_at: created.expires_at });
+              setCodes((current) => ({
+                ...current,
+                [created.device_id]: { code: created.code, expires_at: created.expires_at },
+              }));
               await changed();
             })
           }
@@ -260,6 +256,7 @@ function DeviceRow({
   device,
   card,
   pending,
+  fresh,
   busy,
   onNewCode,
   onChanged,
@@ -267,6 +264,7 @@ function DeviceRow({
   device: SetupDevice;
   card: DeviceCard | undefined;
   pending: Setup["pending_codes"][number] | undefined;
+  fresh: FreshCode | undefined;
   busy: boolean;
   onNewCode: () => void;
   onChanged: () => void;
@@ -281,25 +279,14 @@ function DeviceRow({
         {card?.agent_version ? (
           <span className="text-[13px] text-muted-foreground">agent {card.agent_version}</span>
         ) : null}
-        <span className="ml-auto flex flex-wrap items-center gap-2">
-          {pending ? (
-            <span className="text-[13px] text-muted-foreground">
-              code {pending.hint}…{pending.expired ? " (expired)" : ""}
-            </span>
-          ) : null}
-          {enrolled ? (
-            <Link
-              href={`/devices/${device.id}`}
-              className="inline-flex min-h-11 items-center gap-0.5 text-[13px] text-muted-foreground hover:text-foreground"
-            >
-              Details <ChevronRight className="h-4 w-4" />
-            </Link>
-          ) : (
-            <Button variant="quiet" disabled={busy} onClick={onNewCode}>
-              New code
-            </Button>
-          )}
-        </span>
+        {enrolled ? (
+          <Link
+            href={`/devices/${device.id}`}
+            className="ml-auto inline-flex min-h-11 items-center gap-0.5 text-[13px] text-muted-foreground hover:text-foreground"
+          >
+            Details <ChevronRight className="h-4 w-4" />
+          </Link>
+        ) : null}
       </div>
       {enrolled ? (
         <details className="mt-1">
@@ -310,8 +297,84 @@ function DeviceRow({
             <DeviceDangerZone deviceId={device.id} onChanged={onChanged} />
           </div>
         </details>
-      ) : null}
+      ) : (
+        <EnrolmentCode
+          label={device.label ?? "the Mac"}
+          pending={pending}
+          fresh={fresh}
+          busy={busy}
+          onNewCode={onNewCode}
+        />
+      )}
     </li>
+  );
+}
+
+/**
+ * The code for a device that has not enrolled yet: the full code with Copy
+ * while this page still holds it, otherwise only the server's hint — and
+ * New code either way.
+ */
+function EnrolmentCode({
+  label,
+  pending,
+  fresh,
+  busy,
+  onNewCode,
+}: {
+  label: string;
+  pending: Setup["pending_codes"][number] | undefined;
+  fresh: FreshCode | undefined;
+  busy: boolean;
+  onNewCode: () => void;
+}) {
+  const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
+  const expired = fresh ? new Date(fresh.expires_at) <= new Date() : Boolean(pending?.expired);
+
+  const copy = async () => {
+    if (!fresh) return;
+    setCopied((await copyText(fresh.code)) ? "yes" : "failed");
+    setTimeout(() => setCopied(null), 2500);
+  };
+
+  return (
+    <div className="mt-2 rounded-lg border border-border bg-secondary/40 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {fresh ? (
+          <span className="select-all font-mono text-lg tracking-wider text-foreground">
+            {fresh.code}
+          </span>
+        ) : pending ? (
+          <span className="font-mono text-sm text-muted-foreground">{pending.hint}…</span>
+        ) : (
+          <span className="text-sm text-muted-foreground">No code yet</span>
+        )}
+        {expired ? <Badge tone="warn">expired</Badge> : null}
+        <span className="ml-auto flex items-center gap-2">
+          {fresh && !expired ? (
+            <Button onClick={copy}>
+              {copied === "yes" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {copied === "yes"
+                ? "Copied"
+                : copied === "failed"
+                  ? "Select it instead"
+                  : "Copy code"}
+            </Button>
+          ) : null}
+          <Button variant="quiet" disabled={busy} onClick={onNewCode}>
+            New code
+          </Button>
+        </span>
+      </div>
+      {/* ★ Once. Nothing stores it — so say what to do when it is gone. */}
+      <p className="mt-1 text-xs text-muted-foreground">
+        {fresh && !expired
+          ? `Type it into the installer on ${label}. Shown only here, only now — it expires ${new Date(
+              fresh.expires_at,
+            ).toLocaleTimeString()}.`
+          : "The full code is shown only when it is made. Get a new code to copy it."}
+      </p>
+    </div>
   );
 }
 
