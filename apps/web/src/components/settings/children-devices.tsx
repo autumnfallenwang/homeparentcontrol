@@ -15,7 +15,7 @@ import {
   reissueCode,
 } from "../../lib/parent-api.js";
 import { stateLabel } from "../../lib/state-label.js";
-import { DeviceDangerZone } from "../device-danger-zone.js";
+import { DeviceDangerZone, type EndedEnrolment } from "../device-danger-zone.js";
 import { cardPhrasing } from "../health-card.js";
 import { Page, SectionTitle } from "../shell/page.js";
 import { useViewing } from "../shell/viewing.js";
@@ -65,6 +65,10 @@ export function ChildrenAndDevices() {
   const [cards, setCards] = useState<DeviceCard[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [codes, setCodes] = useState<Record<string, FreshCode>>({});
+  // ⚠️ Page-level, not in the row: a decommissioned device leaves the list on
+  // the very refresh that follows, taking any in-row "done" with it — seen on
+  // the first real decommission, which confirmed nothing on screen.
+  const [ended, setEnded] = useState<(EndedEnrolment & { device: string }) | null>(null);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -138,13 +142,24 @@ export function ChildrenAndDevices() {
           await changed();
         })
       }
-      onChanged={() => void changed()}
+      onChanged={(done) => {
+        setEnded({ ...done, device: device.label ?? "The device" });
+        void changed();
+      }}
     />
   );
 
   return (
     <Page title={title} subtitle="Who is in the household, and the devices that enforce bedtime.">
       {error ? <ErrorNote error={error} /> : null}
+
+      {ended ? (
+        <Banner tone="ok" title={`${ended.label} done — ${ended.device}`}>
+          {ended.stopsEnforcement
+            ? "It uninstalls itself at its next check-in, usually within a minute. Its history is kept."
+            : "It keeps enforcing the rules it already has, but no longer talks to the server."}
+        </Banner>
+      ) : null}
 
       {setup.children.length === 0 ? (
         <Banner tone="info" title="No children yet">
@@ -283,7 +298,7 @@ function DeviceRow({
   fresh: FreshCode | undefined;
   busy: boolean;
   onNewCode: () => void;
-  onChanged: () => void;
+  onChanged: (done: EndedEnrolment) => void;
 }) {
   const status = statusOf(device, card);
   const enrolled = device.status !== "pending";

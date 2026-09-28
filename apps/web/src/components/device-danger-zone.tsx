@@ -18,12 +18,18 @@ import { Banner, Button, Field, inputClass } from "./ui.js";
  * checks the word again — a confirmation only the browser enforces is one
  * anyone can skip.
  */
+/** What just happened, for a confirmation that outlives the device's row. */
+export interface EndedEnrolment {
+  label: string;
+  stopsEnforcement: boolean;
+}
+
 export function DeviceDangerZone({
   deviceId,
   onChanged,
 }: {
   deviceId: string;
-  onChanged: () => void;
+  onChanged: (done: EndedEnrolment) => void;
 }) {
   return (
     <div className="space-y-3">
@@ -52,7 +58,7 @@ function DestructiveRow({
   action: DestructiveAction;
   deviceId: string;
   run: (id: string, confirm: string) => Promise<unknown>;
-  onChanged: () => void;
+  onChanged: (done: EndedEnrolment) => void;
 }) {
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
@@ -94,7 +100,7 @@ function DestructiveRow({
               try {
                 await run(deviceId, typed);
                 setDone(true);
-                onChanged();
+                onChanged({ label: action.label, stopsEnforcement: action.stopsEnforcement });
               } catch (caught) {
                 setError(caught instanceof Error ? caught.message : String(caught));
               } finally {

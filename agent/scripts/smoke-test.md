@@ -255,24 +255,40 @@ actually happened.
 
 ## When you are done
 
+**Decommission it in the UI** — Settings › Children & devices › the device ›
+**Manage** → type `DECOMMISSION`. At its next check-in (seconds to a minute)
+the agent reports that it is leaving and removes itself: every job, plist and
+binary, the installer receipt and its credential. Its history stays on the
+server. Verified on real hardware 2026-09-28: all four jobs gone 20 s after
+the click.
+
+Check that it really left:
+
 ```sh
-# Remove the safe variant before installing the real one.
-for j in deadfall enforcerd sync supervisor; do
+for j in supervisor deadfall enforcerd sync; do
+  launchctl print "system/com.hpc.$j" >/dev/null 2>&1 && echo "still loaded: $j"
+done
+ls /Library/LaunchDaemons /usr/local/libexec | grep hpc     # expect nothing
+```
+
+**Only if the Mac cannot check in any more** (its credential was revoked, or it
+is offline for good), remove it by hand:
+
+```sh
+for j in supervisor deadfall enforcerd sync; do
   sudo launchctl bootout "system/com.hpc.$j" 2>/dev/null
 done
 sudo rm -f /usr/local/libexec/hpc-* /Library/LaunchDaemons/com.hpc.*.plist
 sudo rm -rf /var/db/homeparentcontrol
-
-# If this was your own Mac, put the screen-lock delay back:
-sysadminctl -screenLock <old value> -password -
+sudo pkgutil --forget com.hpc.agent
 ```
 
 ⚠️ **Do not leave the `-dev` build installed.** It logs "would shut down"
 for ever and looks completely healthy. The device page shows `0.1.0-dev`,
 which is the tell.
 
-Then decommission the test device in the UI (`/devices/<id>` →
-Decommission, typed confirmation) so it is not left enrolled.
+If this was your own Mac, put the screen-lock delay back:
+`sysadminctl -screenLock <old value> -password -`
 
 ---
 
