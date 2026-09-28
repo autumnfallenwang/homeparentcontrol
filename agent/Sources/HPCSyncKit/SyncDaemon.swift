@@ -649,17 +649,22 @@ public enum SyncDaemon {
     /// first, then remove the policy, then boot out. Booting out the enforcer
     /// before the final event is flushed loses the one record that says this
     /// was deliberate rather than a failure.
+    ///
+    /// What is removed, and why in this order, is `DecommissionPlan`.
     static func decommission() {
         halted = "decommissioned"
         enqueueLocal(type: "agent.decommissioned", cls: .audit, data: [:])
         if let client, let queue {
             _ = try? client.events(eventsBody((try? queue.batch(limit: batchSize)) ?? []))
         }
-        for path in [Paths.currentPolicy, Paths.lkgPolicy, Paths.credential, Paths.deadfallPlist] {
+        let files = DecommissionPlan.state + DecommissionPlan.plists + DecommissionPlan.binaries
+        for path in files {
             try? FileManager.default.removeItem(atPath: path)
         }
-        for job in ["deadfall", "enforcer", "sync"] {
-            _ = DeviceState.shell("/bin/launchctl", ["bootout", "system/com.hpc.\(job)"])
+        _ = DeviceState.shell("/usr/sbin/pkgutil", ["--forget", DecommissionPlan.receipt])
+        // Sync is last in the list, and booting it out ends this process.
+        for job in DecommissionPlan.jobs {
+            _ = DeviceState.shell("/bin/launchctl", ["bootout", "system/\(job)"])
         }
     }
 
