@@ -82,7 +82,10 @@ public enum SampleSource {
         let rest = text[range.upperBound...]
         let raw = rest.prefix { $0 != "\n" && $0 != " " }
         let trimmed = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\"") )
-        return trimmed.isEmpty ? nil : trimmed
+        // ⚠️ lsappinfo prints a missing value as `[ NULL ]`. Cut at the space,
+        // that read as an app called "[" — shown to a parent on Ivy's Mac.
+        if trimmed.isEmpty || trimmed.hasPrefix("[") { return nil }
+        return trimmed
     }
 
     /// ★ `ps -o %cpu` on macOS is a DECAYING average, not a lifetime one.

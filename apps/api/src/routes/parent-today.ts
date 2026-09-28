@@ -114,6 +114,9 @@ export async function handleToday(c: Context<{ Variables: ParentVariables }>) {
   return c.json({ generated_at: now.toISOString(), devices: cards });
 }
 
+/** Reverse-DNS: `com.apple.finder`. At least two dot-separated parts. */
+const BUNDLE_ID = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+
 /** Today's rollup, in the CHILD's timezone — never the server's. */
 async function todayUsage(deviceId: string, timezone: string | null, now: Date) {
   const zone = timezone ?? "UTC";
@@ -133,7 +136,14 @@ async function todayUsage(deviceId: string, timezone: string | null, now: Date) 
     .from(usageDaily)
     .where(and(eq(usageDaily.deviceId, deviceId), eq(usageDaily.localDay, localDay)));
 
-  const top = [...rows].sort((a, b) => b.activeS - a.activeS).slice(0, 5);
+  // ★ Listed: real apps with at least a minute of use. A row whose id is not
+  // a bundle id — lsappinfo's `[ NULL ]` arrived as "[" from Ivy's Mac — and
+  // a row that would read "0 m" are noise on a parent's card. Their seconds
+  // still count in `active_s` below: the Mac WAS in use.
+  const top = rows
+    .filter((row) => BUNDLE_ID.test(row.bundleId) && row.activeS >= 60)
+    .sort((a, b) => b.activeS - a.activeS)
+    .slice(0, 5);
   return {
     local_day: localDay,
     // ★ `active_s` is the meter (A.33), and the UI labels it with

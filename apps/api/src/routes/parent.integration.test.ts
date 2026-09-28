@@ -14,6 +14,7 @@ import {
   policyVersions,
   scheduleWindows,
   tripwires,
+  usageDaily,
   users,
 } from "../db/schema.js";
 import { mintDeviceKey } from "../lib/device-keys.js";
@@ -222,6 +223,40 @@ d("GET /today", () => {
     // ★ Read out of the COMPILED document, not recomputed from the rows.
     expect(card?.tonight?.windows[0]?.restricted_from).toBe("21:30");
     expect(card?.usage_today.active_s).toBe(0);
+  });
+
+  /**
+   * ★ Ivy's card on 2026-09-28 listed an app called "[" at "0 m": lsappinfo's
+   * `[ NULL ]`, cut at the space by the agent. Its time is real and still
+   * counts; it is just not an app, and nor is anything under a minute.
+   */
+  it("★ lists only real apps with a minute of use — but every second still counts", async () => {
+    const f = await seed();
+    const localDay = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+    const row = (bundleId: string, activeS: number) => ({
+      householdId: f.householdId,
+      deviceId: f.deviceId,
+      childId: f.childId,
+      localDay,
+      bundleId,
+      foregroundS: activeS,
+      activeS,
+    });
+    await db
+      .insert(usageDaily)
+      .values([row("com.apple.finder", 247), row("[", 27), row("com.tencent.meeting", 20)]);
+
+    const body = (await (await get("/today", f)).json()) as {
+      devices: { usage_today: { active_s: number; top_apps: { bundle_id: string }[] } }[];
+    };
+    const usage = body.devices[0]?.usage_today;
+    expect(usage?.top_apps.map((app) => app.bundle_id)).toEqual(["com.apple.finder"]);
+    expect(usage?.active_s).toBe(247 + 27 + 20);
   });
 
   // ★ §5.8: "one tripwire banner not eight".

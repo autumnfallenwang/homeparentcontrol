@@ -39,6 +39,20 @@ struct SampleSourceTests {
         #expect(SampleSource.value(named: "absent", in: output) == nil)
     }
 
+    /// ★ Found on Ivy's Mac, 2026-09-28: a frontmost process with no bundle
+    /// id makes lsappinfo print `[ NULL ]`, and the parser stopped at the
+    /// space — so "[" went to the server as an app, and the parent's Today
+    /// card listed "[ … 0 m".
+    @Test("lsappinfo's [ NULL ] is no value, never an app called \"[\"")
+    func nullIsNil() {
+        let output = """
+            "CFBundleIdentifier"=[ NULL ]
+            "pid"=412
+            """
+        #expect(SampleSource.value(named: "CFBundleIdentifier", in: output) == nil)
+        #expect(SampleSource.value(named: "pid", in: output) == "412")
+    }
+
     @Test("a session probe line parses, and an unknown one is nil not false")
     func parsesSessionProbe() {
         #expect(SessionProbe.parse("locked=1 onconsole=1") == true)

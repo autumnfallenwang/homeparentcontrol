@@ -175,6 +175,48 @@ export function SegmentedControl<T extends string>({
  * VoiceOver to announce it, and VoiceOver is how this page gets used
  * one-handed on a phone.
  */
+/**
+ * An on/off switch, for a setting that is simply on or off.
+ *
+ * A real `role="switch"` button, so a screen reader says "on"/"off"; 44px
+ * tall like every other control here (P2.6).
+ */
+export function Toggle({
+  checked,
+  onChange,
+  label,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className="inline-flex min-h-11 shrink-0 items-center disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      <span
+        className={`flex h-7 w-12 items-center rounded-full px-0.5 transition ${
+          checked ? "bg-primary" : "bg-muted-foreground/35"
+        }`}
+      >
+        <span
+          className={`size-6 rounded-full bg-card shadow transition-transform ${
+            checked ? "translate-x-5" : "translate-x-0"
+          }`}
+        />
+      </span>
+    </button>
+  );
+}
+
 export function Field({
   label,
   htmlFor,
