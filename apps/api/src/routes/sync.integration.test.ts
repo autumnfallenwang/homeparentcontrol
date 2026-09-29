@@ -169,6 +169,26 @@ d("POST /sync — the tick", () => {
     expect(device?.arch).toBe("arm64");
   });
 
+  it("reports policy_missing when the Mac has no policy at all", async () => {
+    const f = await seed();
+    await sync(f.token, tick(f.deviceId, { policy_state: { etag: null, policy_version: null } }));
+    const [device] = await db.select().from(devices).where(eq(devices.id, f.deviceId));
+    expect(device?.selfReportedReason).toBe("policy_missing");
+  });
+
+  /** ★ 28 Sep: a restarted agent forgot its etag but was enforcing the file on disk. */
+  it("★ a policy on disk without a remembered etag is not missing", async () => {
+    const f = await seed();
+    await sync(
+      f.token,
+      tick(f.deviceId, {
+        policy_state: { etag: null, policy_version: null, source: "current", using_lkg: false },
+      }),
+    );
+    const [device] = await db.select().from(devices).where(eq(devices.id, f.deviceId));
+    expect(device?.selfReportedReason).toBeNull();
+  });
+
   /** ⚠️ Health belongs to step 5's liveness job. One writer per column. */
   it("does NOT touch health_state", async () => {
     const f = await seed();

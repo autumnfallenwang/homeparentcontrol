@@ -71,6 +71,11 @@ public enum BedtimePredicate {
                 let relaxed = applyOverrides(
                     to: span, window: window, day: day, policy: policy, now: now, zone: zone
                 )
+                // ★ A night with nothing left to enforce ("No bedtime
+                // tonight", or extra time past `Until`) has no boundary and
+                // no warnings either. The warnings used to count down to a
+                // lock that was never coming (28 Sep).
+                guard relaxed.until > relaxed.from else { continue }
 
                 // The predicate itself: [from, until). Half-open, so a window
                 // ending 07:00 does not also restrict at exactly 07:00.

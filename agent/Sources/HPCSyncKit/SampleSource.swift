@@ -49,6 +49,32 @@ public enum SampleSource {
             idleS: idleS)
     }
 
+    /// Just the lock state, for `Sampler.sessionPoll`: no `lsappinfo`, no
+    /// `ps`.
+    ///
+    /// ⚠️ Nil when the lock probe cannot tell. `observe` reads unknown as
+    /// unlocked, which costs a usage sample at worst; here it would put a
+    /// false red "unlocked" row in front of a parent, six times a minute.
+    public static func observeSession(now: Date = Date()) -> Sampler.Observation? {
+        let uid = Effects.consoleUser()
+        let locked: Bool
+        if let uid {
+            guard let probed = SessionProbe.parse(asUserOutput(uid, [selfPath, SessionProbe.flag]))
+            else { return nil }
+            locked = probed
+        } else {
+            locked = true
+        }
+        return Sampler.Observation(
+            at: now,
+            uptime: ProcessInfo.processInfo.systemUptime,
+            consoleUser: uid.map(String.init),
+            screenLocked: locked,
+            frontmostBundleId: nil,
+            frontmostCpuPct: nil,
+            idleS: hidIdleSeconds() ?? 0)
+    }
+
     // MARK: - Frontmost app
 
     /// `lsappinfo front` → an ASN, then `lsappinfo info -only …` → the fields.

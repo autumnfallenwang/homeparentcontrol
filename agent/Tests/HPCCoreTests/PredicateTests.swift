@@ -273,6 +273,51 @@ struct PredicateTests {
         #expect(!BedtimePredicate.evaluate(policy: policy, now: Self.ny("2026-09-21 22:00")).isRestricted)
     }
 
+    /// ★ 28 Sep: warnings counted down to a lock that "No bedtime tonight"
+    /// had already cancelled.
+    @Test("no bedtime tonight means no warnings tonight, and nothing to wake for")
+    func suspendSilencesWarnings() {
+        let json = """
+            [{"id":"018f2a4d-1122-7a3b-8c4d-5e6f7a8b9c0d","type":"suspend",
+              "window_id":null,"minutes":null,
+              "effective_date":"2026-09-21","expires_at":"2026-09-22T12:00:00.000Z",
+              "granted_via":"ui"}]
+            """
+        let policy = Self.schoolNights(overrides: json)
+        let e = BedtimePredicate.evaluate(policy: policy, now: Self.ny("2026-09-21 21:29"))
+        #expect(e.dueWarnings.isEmpty)
+        #expect(!e.isRestricted)
+        let evening = BedtimePredicate.evaluate(policy: policy, now: Self.ny("2026-09-21 19:00"))
+        #expect(evening.nextBoundaryAt == nil)
+    }
+
+    @Test("extra time past the end of the window silences its warnings too")
+    func extendPastUntilSilencesWarnings() {
+        let json = """
+            [{"id":"018f2a4d-1122-7a3b-8c4d-5e6f7a8b9c0d","type":"extend",
+              "window_id":"018f2a4b-7c31-7d9e-9a2b-3c5d7e9f1a42","minutes":600,
+              "effective_date":"2026-09-21","expires_at":"2026-09-22T12:00:00.000Z",
+              "granted_via":"ui"}]
+            """
+        let policy = Self.schoolNights(overrides: json)
+        let morning = BedtimePredicate.evaluate(policy: policy, now: Self.ny("2026-09-22 06:55"))
+        #expect(morning.dueWarnings.isEmpty)
+        #expect(!morning.isRestricted)
+    }
+
+    @Test("extra time that still leaves a bedtime moves the warnings with it")
+    func extendMovesWarnings() {
+        let json = """
+            [{"id":"018f2a4d-1122-7a3b-8c4d-5e6f7a8b9c0d","type":"extend",
+              "window_id":"018f2a4b-7c31-7d9e-9a2b-3c5d7e9f1a42","minutes":30,
+              "effective_date":"2026-09-21","expires_at":"2026-09-22T12:00:00.000Z",
+              "granted_via":"ui"}]
+            """
+        let policy = Self.schoolNights(overrides: json)
+        let e = BedtimePredicate.evaluate(policy: policy, now: Self.ny("2026-09-21 21:59"))
+        #expect(e.dueWarnings.first?.leadMinutes == 1)
+    }
+
     // MARK: - Warnings, computed in absolute time
 
     /// ⚠️ "Resolve the boundary to an instant FIRST, then subtract minutes in

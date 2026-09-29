@@ -37,7 +37,10 @@ public enum DecommissionPlan {
     /// State that must not outlive the device: a policy to obey, a credential
     /// to use, and a staged code a restarted sync would enrol with.
     public static var state: [String] {
-        [Paths.currentPolicy, Paths.lkgPolicy, Paths.credential, Paths.enrolmentCode]
+        [
+            Paths.currentPolicy, Paths.lkgPolicy, Paths.policyEtag, Paths.credential,
+            Paths.enrolmentCode
+        ]
     }
 
     /// The installer receipt, forgotten so `pkgutil --pkgs` stops listing it.

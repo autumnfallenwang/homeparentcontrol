@@ -76,11 +76,22 @@ public enum SyncDaemon {
         sampler.resume()
         samplerTimer = sampler
 
+        // ★ A third, for lock and unlock between samples. Same queue, so it
+        // and the sampler never touch `samplerState` at once.
+        let session = DispatchSource.makeTimerSource(queue: dispatchQueue)
+        session.schedule(
+            deadline: .now() + .seconds(Sampler.sessionPollS),
+            repeating: .seconds(Sampler.sessionPollS), leeway: .seconds(1))
+        session.setEventHandler { sessionTick() }
+        session.resume()
+        sessionTimer = session
+
         dispatchMain()
     }
 
-    /// Held so the timer is not deallocated the moment `main` returns.
+    /// Held so the timers are not deallocated the moment `main` returns.
     static var samplerTimer: DispatchSourceTimer?
+    static var sessionTimer: DispatchSourceTimer?
 
     static func sampleIntervalS() -> Int {
         max(5, telemetry().sampleIntervalS)
@@ -112,9 +123,20 @@ public enum SyncDaemon {
         let observation = SampleSource.observe()
         let output = Sampler.sample(observation, state: samplerState, telemetry: config)
         samplerState = output.state
-        guard !output.events.isEmpty else { return }
+        enqueueSamples(output.events, queue: queue)
+    }
 
-        let rows = output.events.map { event -> Queue.Row in
+    /// Lock and unlock between samples — `Sampler.sessionPoll`.
+    static func sessionTick() {
+        guard let queue, let observation = SampleSource.observeSession() else { return }
+        let output = Sampler.sessionPoll(observation, state: samplerState)
+        samplerState = output.state
+        enqueueSamples(output.events, queue: queue)
+    }
+
+    static func enqueueSamples(_ events: [Sampler.Event], queue: Queue) {
+        guard !events.isEmpty else { return }
+        let rows = events.map { event -> Queue.Row in
             var data: [String: Any] = [:]
             for (key, value) in event.data { data[key] = value }
             for (key, value) in event.text { data[key] = value }
@@ -290,6 +312,8 @@ public enum SyncDaemon {
             queueBlock["oldest_event_at"] = iso(oldest)
         }
 
+        recallPolicyEtag(for: policy)
+
         var policyState: [String: Any] = [:]
         if let etag = lastEtag { policyState["etag"] = etag }
         if let applied = appliedVersion { policyState["policy_version"] = applied }
@@ -403,6 +427,7 @@ public enum SyncDaemon {
 
         lastEtag = envelope["etag"] as? String
         appliedVersion = envelope["policy_version"] as? Int
+        writePolicyEtag(etag: lastEtag, version: appliedVersion)
         enqueueLocal(
             type: "policy.applied", cls: .audit,
             data: ["policy_version": appliedVersion ?? 0, "etag": lastEtag ?? ""])

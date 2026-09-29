@@ -6,13 +6,16 @@ import Testing
 /// `kern.boottime` is what `agent.started` now carries (ADR 0014).
 struct BootTimeTests {
 
-    @Test("★ the kernel boot time reads, and is never after now − uptime")
+    @Test("★ the kernel boot time reads, and is close to or before now − uptime")
     func readsAndIsConsistent() throws {
         let boot = try #require(BootTime.kernel())
-        // Uptime pauses in sleep, so now − uptime can only be LATER than the
-        // real boot, never earlier. Two seconds of slack for the two reads.
+        // Uptime pauses in sleep, so after a sleep now − uptime is LATER than
+        // the boot. ⚠️ Without one it can be a few seconds EARLIER: uptime's
+        // clock starts at power-on, before the kernel stamps `kern.boottime`
+        // — 6 s on this Mac, right after the 28 Sep reboot, when a 2 s slack
+        // failed. 60 s still catches a garbage reading.
         let fromUptime = Date(timeIntervalSinceNow: -ProcessInfo.processInfo.systemUptime)
-        #expect(boot <= fromUptime.addingTimeInterval(2))
+        #expect(boot <= fromUptime.addingTimeInterval(60))
         #expect(boot > Date(timeIntervalSince1970: 1_577_836_800))  // after 2020
         #expect(boot < Date())
     }

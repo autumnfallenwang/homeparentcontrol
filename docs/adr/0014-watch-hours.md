@@ -57,3 +57,13 @@ bedtime apart from school time. Every window is simply a period the parent restr
   analysis, and unlocks while usage data is on.
 - Unlocks are seen at the sampler's 60-second granularity. Nothing is seen while the Mac is off or
   asleep, and nothing can happen then either.
+
+## Amendment — 2026-09-28, after the first live test
+
+- **Lock and unlock are checked every 10 s** (`Sampler.sessionPoll`), not only at the 60 s sample.
+  A lock and unlock inside one minute left no trace. The poll reports only a change between locked
+  and unlocked, and never touches the usage meter. It skips a reading the lock probe can't make,
+  because unknown means "unlocked" to the full sample, and a false red unlock is worse than a missed
+  one.
+- **"No bedtime tonight" also silences that night's warnings.** Warnings used to count down to a
+  lock the override had already cancelled. The same applies to extra time that runs past `Until`.

@@ -153,6 +153,39 @@ d("the five-state machine — §7.3", () => {
     expect(await stateOf(f.deviceId)).toBe("EXPECTED_OFFLINE");
   });
 
+  /**
+   * ★ Found on Aaron's Mac, 2026-09-28: the two stop events from a RESTART
+   * were queued on the Mac and only arrived after it came back — so when it
+   * went silent a few minutes later, they were still "recent" and the silence
+   * read as a clean stop. A stop the agent has since started again after
+   * explains nothing.
+   */
+  it("★ a stop followed by a start does not excuse a later silence", async () => {
+    const f = await seed({ lastSyncAt: ago(15 * 60_000) });
+    const event = (id: string, type: string, tsMs: number) => ({
+      householdId: f.householdId,
+      deviceId: f.deviceId,
+      eventId: `018f2a4c-7b31-7c9e-9d2a-0000000000${id}`,
+      type,
+      v: 1,
+      class: "audit",
+      ts: ago(tsMs),
+      // Both delivered together, after the restart, just before the silence.
+      receivedAt: ago(16 * 60_000),
+      bootId: "018f2a4c-0000-7000-8000-000000000001",
+      seq: -1,
+      data: {},
+    });
+    await db
+      .insert(events)
+      .values([
+        event("1a", "agent.stopping", 25 * 60_000),
+        event("1b", "agent.started", 24 * 60_000),
+      ]);
+    await evaluateLiveness(NOW);
+    expect(await stateOf(f.deviceId)).toBe("UNEXPECTED_SILENCE");
+  });
+
   it("UNENROLLED while a device has never ticked", async () => {
     // A sixth state the schema has and §7.3's table does not.
     const f = await seed({ lastSyncAt: null, status: "enrolled" });

@@ -92,7 +92,15 @@ function selfReportedReason(body: SyncRequest): string | null {
   if (body.agent.kill_switch != null) return "kill_switch_present";
   if (body.policy_state.signature_valid === false) return "signature_invalid";
   if (body.policy_state.using_lkg === true) return "policy_corrupt";
-  if (body.policy_state.etag == null && body.policy_state.policy_version == null) {
+  // ★ Missing means no policy on the Mac, not "no etag". A restarted agent
+  // used to forget its etag while still enforcing the file on disk, and read
+  // as DEGRADED/policy_missing until the next tick (22:13 on 28 Sep). The
+  // agent reports `source` whenever it has loaded a policy.
+  if (
+    body.policy_state.etag == null &&
+    body.policy_state.policy_version == null &&
+    !body.policy_state.source
+  ) {
     return "policy_missing";
   }
   if ((body.enforcement.consecutive_eval_failures ?? 0) >= EVAL_FAILURES_LIMIT) {

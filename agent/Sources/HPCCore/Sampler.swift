@@ -140,10 +140,7 @@ public enum Sampler {
         // states produces a stream of zero-length spans.
         let current = classify(observation)
         if current != state.sessionState {
-            var text = ["state": current.rawValue]
-            if let user = observation.consoleUser { text["console_user"] = user }
-            events.append(
-                Event(type: "session.state", at: observation.at, data: [:], text: text))
+            events.append(transition(to: current, observation))
         }
         state.sessionState = current
 
@@ -169,6 +166,35 @@ public enum Sampler {
         state.lastAt = observation.at
         state.lastUptime = observation.uptime
         return Output(events: events, state: state)
+    }
+
+    /// How often `sessionPoll` looks, between the full samples.
+    public static let sessionPollS = 10
+
+    /// ★ Lock and unlock only, between full samples.
+    ///
+    /// At the 60 s sample alone, a lock and unlock inside one interval left
+    /// no trace, and neither did the login after bedtime it may have been
+    /// (22:42 on 28 Sep). This runs every `sessionPollS` and reports only a
+    /// change between locked and unlocked. Active-versus-awake is left to
+    /// the full sample, and the usage meter (`lastAt`, `lastUptime`) is not
+    /// touched, so the poll cannot add or lose a second of usage.
+    ///
+    /// Nothing before the first full sample: that sets the baseline.
+    public static func sessionPoll(_ observation: Observation, state: State) -> Output {
+        var state = state
+        guard let previous = state.sessionState else { return Output(state: state) }
+        let current = classify(observation)
+        let wasLocked = previous == .locked || previous == .asleep
+        guard wasLocked != (current == .locked) else { return Output(state: state) }
+        state.sessionState = current
+        return Output(events: [transition(to: current, observation)], state: state)
+    }
+
+    static func transition(to current: SessionState, _ observation: Observation) -> Event {
+        var text = ["state": current.rawValue]
+        if let user = observation.consoleUser { text["console_user"] = user }
+        return Event(type: "session.state", at: observation.at, data: [:], text: text)
     }
 
     /// ★ A.33 — the meter. "An idle Spotify window left open overnight must

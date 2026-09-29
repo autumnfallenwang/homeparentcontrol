@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, ne } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   agentStatusIntervals,
@@ -207,8 +207,8 @@ async function stoppedCleanly(deviceId: string, since: Date): Promise<boolean> {
   // A little slack before the last tick: the stopping event and the final
   // sync race each other on the way out.
   const cutoff = new Date(since.getTime() - 5 * 60_000);
-  const [row] = await db
-    .select({ id: events.eventId })
+  const [stop] = await db
+    .select({ ts: events.ts })
     .from(events)
     .where(
       and(
@@ -217,8 +217,22 @@ async function stoppedCleanly(deviceId: string, since: Date): Promise<boolean> {
         gte(events.receivedAt, cutoff),
       ),
     )
+    .orderBy(desc(events.ts))
     .limit(1);
-  return Boolean(row);
+  if (!stop) return false;
+  // ★ A stop the agent came back from excuses nothing. A restart's stop and
+  // start arrive together in the next batch, after it has already been
+  // ticking again; without this a later, real silence read as "stopped
+  // cleanly" (22:20–22:31 on 28 Sep). Ordered by the agent's `ts`, since both
+  // were received in the same batch.
+  const [restarted] = await db
+    .select({ id: events.eventId })
+    .from(events)
+    .where(
+      and(eq(events.deviceId, deviceId), eq(events.type, "agent.started"), gt(events.ts, stop.ts)),
+    )
+    .limit(1);
+  return !restarted;
 }
 
 /** Is `now` inside one of this device's `expected_online` windows, in its own zone? */

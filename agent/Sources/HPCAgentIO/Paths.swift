@@ -15,6 +15,10 @@ public enum Paths {
     public static var currentPolicy: String { "\(root)/policy.current.json" }
     public static var lkgPolicy: String { "\(root)/policy.lkg.json" }
     public static var signingKeys: String { "\(root)/policy_signing_keys.json" }
+    /// The etag and version the server gave `policy.current.json`. Written by
+    /// sync beside the policy, so a restarted daemon still knows which rules
+    /// it holds.
+    public static var policyEtag: String { "\(root)/policy.etag.json" }
 
     // ── The enforcer's own state.
     public static var cleanExit: String { "\(root)/clean_exit" }

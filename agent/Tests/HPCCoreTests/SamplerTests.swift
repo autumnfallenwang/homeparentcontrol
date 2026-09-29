@@ -254,4 +254,61 @@ struct SamplerTests {
         #expect(Self.session(output) != nil)
         #expect(Self.usage(output) == nil)
     }
+
+    // MARK: - The 10 s session poll (22:42 on 28 Sep: a quick lock left no trace)
+
+    @Test("★ a lock and an unlock 15 s apart, both between samples, are both recorded")
+    func quickLockUnlock() {
+        var state = Self.settled()
+        let locked = Sampler.sessionPoll(
+            Self.observation(at: 10, uptime: 1_010, locked: true, bundle: nil), state: state)
+        state = locked.state
+        let unlocked = Sampler.sessionPoll(
+            Self.observation(at: 25, uptime: 1_025, bundle: nil), state: state)
+        #expect(locked.events.map { $0.text["state"] } == ["locked"])
+        #expect(unlocked.events.map { $0.text["state"] } == ["active"])
+        #expect(unlocked.events.first?.at == Self.t0.addingTimeInterval(25))
+    }
+
+    @Test("the poll leaves the usage meter alone — the next sample still counts 60 s")
+    func pollDoesNotTouchUsage() {
+        let settled = Self.settled()
+        var state = Sampler.sessionPoll(
+            Self.observation(at: 10, uptime: 1_010, locked: true, bundle: nil),
+            state: settled
+        ).state
+        state = Sampler.sessionPoll(
+            Self.observation(at: 20, uptime: 1_020, bundle: nil), state: state
+        ).state
+        #expect(state.lastAt == settled.lastAt)
+        #expect(state.lastUptime == settled.lastUptime)
+        let next = Sampler.sample(Self.observation(), state: state, telemetry: Self.config)
+        #expect(Self.usage(next)?.data["foreground_s"] == 60)
+        #expect(Self.session(next) == nil)
+    }
+
+    @Test("still locked, still unlocked, or merely idle: the poll says nothing")
+    func pollIsQuietWithoutALockChange() {
+        let settled = Self.settled()
+        #expect(Sampler.sessionPoll(Self.observation(at: 10), state: settled).events.isEmpty)
+        #expect(
+            Sampler.sessionPoll(Self.observation(at: 10, idle: 900), state: settled)
+                .events.isEmpty)
+        let locked = Sampler.sessionPoll(
+            Self.observation(at: 10, locked: true), state: settled
+        ).state
+        #expect(
+            Sampler.sessionPoll(Self.observation(at: 20, locked: true), state: locked)
+                .events.isEmpty)
+        #expect(
+            Sampler.sessionPoll(Self.observation(at: 20, user: nil), state: locked)
+                .events.isEmpty)
+    }
+
+    @Test("before the first full sample there is no baseline, and no event")
+    func pollNeedsABaseline() {
+        let output = Sampler.sessionPoll(Self.observation(locked: true), state: .init())
+        #expect(output.events.isEmpty)
+        #expect(output.state.sessionState == nil)
+    }
 }
