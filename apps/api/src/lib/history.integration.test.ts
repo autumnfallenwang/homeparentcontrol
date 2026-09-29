@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, db } from "../db/index.js";
 import {
@@ -10,6 +10,7 @@ import {
   events,
   households,
   policySets,
+  policyVersions,
   usageDaily,
   users,
 } from "../db/schema.js";
@@ -119,7 +120,7 @@ afterAll(async () => {
 });
 
 d("history, projected from real events", () => {
-  it("★ a bedtime shutdown and the server's power-on come out as the red lines", async () => {
+  it("★ a bedtime shutdown and the server's power-on read as two plain lines — no watch hours, nothing red", async () => {
     const f = await seed();
     await bedtimeCycle(f);
     await projectEvents();
@@ -135,8 +136,8 @@ d("history, projected from real events", () => {
     expect(story.reverse()).toEqual([
       HISTORY_TEXT.started,
       "Enforced: lock",
-      `${HISTORY_TEXT.shutDownAtBedtime} [red]`,
-      `${HISTORY_TEXT.turnedOn} [red]`,
+      HISTORY_TEXT.shutDownAtBedtime,
+      HISTORY_TEXT.turnedOn,
     ]);
     expect(history.startups).toBe(1);
   });
@@ -218,5 +219,78 @@ d("history, projected from real events", () => {
       grain: "day",
     });
     expect(payload.totals.activeS).toBe(480);
+  });
+
+  /**
+   * ★ ADR 0014 end to end: a real compiled document with a watch period,
+   * judged by the rules in force at the moment, through the real loader.
+   */
+  it("★ a startup and an unlock during watch hours are red, and counted; the rest is not", async () => {
+    const f = await seed();
+    const [set] = await db
+      .select({ id: policySets.id })
+      .from(policySets)
+      .where(eq(policySets.childId, f.childId));
+    // Every night: enforced 21:00–21:05 UTC, then watched until 23:00.
+    await db.insert(policyVersions).values({
+      householdId: f.householdId,
+      deviceId: f.deviceId,
+      policySetId: set?.id ?? "",
+      version: 1,
+      documentHash: "test",
+      etag: 'W/"pol-test-v1"',
+      notBefore: minutes(-600),
+      document: {
+        timezone: "UTC",
+        schedule: {
+          kind: "windows",
+          windows: [
+            {
+              id: "5f0b1b7c-0000-4000-8000-000000000001",
+              label: "School nights",
+              days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+              restricted_from: "21:00",
+              restricted_until: "21:05",
+              watch_until: "23:00",
+            },
+          ],
+        },
+        overrides: [],
+      },
+    });
+    // T0 is 21:00 UTC. Locked at 21:10, turned on at 21:30, unlocked at 21:40,
+    // and in the afternoon an unlock that must not be listed.
+    await emit(f, "session.state", { state: "locked" }, minutes(10));
+    await db.insert(enforcementLog).values({
+      householdId: f.householdId,
+      deviceId: f.deviceId,
+      childId: f.childId,
+      eventId: randomUUID(),
+      kind: "power_on",
+      occurredAt: minutes(30),
+      summary: "Mac turned on",
+      detail: { source: "server" },
+    });
+    await emit(f, "session.state", { state: "awake" }, minutes(40));
+    await emit(f, "session.state", { state: "locked" }, minutes(-300));
+    await emit(f, "session.state", { state: "awake" }, minutes(-290));
+    await projectEvents();
+
+    const payload = await reportQuery({
+      householdId: f.householdId,
+      childId: f.childId,
+      from: minutes(-360),
+      to: minutes(180),
+      grain: "hour",
+    });
+    const red = payload.enforcement.filter((row) => row.tone === "alarm").map((row) => row.summary);
+    expect(red.sort()).toEqual([
+      "Mac turned on during School nights's watch hours",
+      "Mac unlocked during School nights's watch hours",
+    ]);
+    expect(payload.totals.afterBedtime).toBe(2);
+    expect(payload.totals.startups).toBe(1);
+    // The afternoon unlock is not listed at all.
+    expect(payload.enforcement.filter((row) => row.kind === "session_unlocked")).toHaveLength(1);
   });
 });

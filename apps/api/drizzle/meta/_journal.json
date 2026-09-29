@@ -36,6 +36,13 @@
       "when": 1790623540021,
       "tag": "0004_device_last_uptime",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790643156681,
+      "tag": "0005_window_watch_until",
+      "breakpoints": true
     }
   ]
 }

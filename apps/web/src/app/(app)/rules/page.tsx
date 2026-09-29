@@ -388,6 +388,7 @@ function WindowSummary({ window, onEdit }: { window: RuleWindow; onEdit: () => v
           </div>
           <p className="mt-1 text-sm">
             {describeDays(window.days)} · {window.restricted_from} → {window.restricted_until}
+            {window.watch_until ? ` · watch until ${window.watch_until}` : ""}
           </p>
           <p className="mt-0.5 text-[13px] text-muted-foreground">
             Warnings{" "}
@@ -484,6 +485,25 @@ function WindowEditor({
               onChange={(event) => onChange({ ...window, restricted_until: event.target.value })}
             />
           </Field>
+        </div>
+
+        {/*
+          ★ ADR 0014. Nothing is enforced after Until — this only decides what
+          the parent's Activity flags in red. Optional: empty means no watch.
+        */}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Watch until (optional)">
+            <input
+              type="time"
+              className={inputClass}
+              value={window.watch_until ?? ""}
+              onChange={(event) => onChange({ ...window, watch_until: event.target.value || null })}
+            />
+          </Field>
+          <p className="self-end pb-2 text-[13px] text-muted-foreground">
+            After Until, keep watching: any startup or login before this time shows in red in
+            Activity. Nothing is locked or shut down.
+          </p>
         </div>
 
         <div>

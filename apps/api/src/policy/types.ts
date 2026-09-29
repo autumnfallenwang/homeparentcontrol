@@ -65,6 +65,8 @@ export interface WindowInput {
   days: string[];
   restrictedFrom: string;
   restrictedUntil: string;
+  /** Optional watch period after `restrictedUntil` (ADR 0014). Null = none. */
+  watchUntil?: string | null;
   /**
    * The generated column, never re-derived. §5.2: "Derived ONCE so the UI, the
    * compiler and the validator cannot each re-derive the wrap rule slightly

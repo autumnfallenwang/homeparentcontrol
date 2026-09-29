@@ -1,5 +1,5 @@
 import { appUsageSample, ENFORCEMENT_LOG_KINDS, sessionStateSample } from "@hpc/contract";
-import { and, asc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   devices,
@@ -358,6 +358,51 @@ async function recomputeBucket(bucket: Bucket): Promise<{
         set: { endedAt, consoleUser: parsed.data.console_user ?? null },
       });
     spans++;
+  }
+
+  // ── Unlocks (ADR 0014): the Mac going from locked — which includes the
+  // login window — or asleep, to in use. That is the moment a person started
+  // using it, and what the parent's history flags inside watch hours. The
+  // state BEFORE this hour is looked up, so an unlock at 01:00 after a lock
+  // at 23:55 is not missed at the hour boundary.
+  if (transitions.length > 0) {
+    const [before] = await db
+      .select({ data: events.data })
+      .from(events)
+      .where(
+        and(
+          eq(events.deviceId, bucket.deviceId),
+          eq(events.type, "session.state"),
+          lt(events.ts, (transitions[0] as { ts: Date }).ts),
+        ),
+      )
+      .orderBy(desc(events.ts))
+      .limit(1);
+    let previous = sessionStateSample.safeParse(before?.data).data?.state ?? null;
+    for (const row of transitions) {
+      const state = sessionStateSample.safeParse(row.data).data?.state ?? null;
+      if (!state) continue;
+      if (
+        (previous === "locked" || previous === "asleep") &&
+        (state === "awake" || state === "active")
+      ) {
+        const detail = { from: previous, to: state };
+        const summary = previous === "locked" ? "Mac unlocked" : "Mac used after waking";
+        await db
+          .insert(enforcementLog)
+          .values({
+            ...base,
+            eventId: row.eventId,
+            kind: "session_unlocked",
+            occurredAt: row.ts,
+            summary,
+            detail,
+          })
+          .onConflictDoUpdate({ target: enforcementLog.eventId, set: { summary, detail } });
+        enforcementRows++;
+      }
+      previous = state;
+    }
   }
 
   // A span an EARLIER hour left open — because its closing transition had not

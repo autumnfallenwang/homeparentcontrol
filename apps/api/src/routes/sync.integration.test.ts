@@ -402,6 +402,46 @@ d("POST /sync — power-on and clock (found 2026-09-28)", () => {
     expect(await powerOns(f.deviceId)).toEqual([]);
   });
 
+  /** A second check-in `gapMinutes` after the first, with uptime `awakeS` further on. */
+  async function silence(gapMinutes: number, awakeS: number) {
+    const f = await seed();
+    const first = tick(f.deviceId);
+    first.clock.continuous_ns = uptime(3_600);
+    await sync(f.token, first);
+    await db
+      .update(devices)
+      .set({ lastSyncAt: new Date(Date.now() - gapMinutes * 60_000) })
+      .where(eq(devices.id, f.deviceId));
+    const second = tick(f.deviceId);
+    second.clock.continuous_ns = uptime(3_600 + awakeS);
+    await sync(f.token, second);
+    return db
+      .select({ kind: enforcementLog.kind, detail: enforcementLog.detail })
+      .from(enforcementLog)
+      .where(
+        and(
+          eq(enforcementLog.deviceId, f.deviceId),
+          sql`${enforcementLog.kind} in ('asleep','unreported')`,
+        ),
+      );
+  }
+
+  it("★ uptime that stopped during a silence means it was ASLEEP", async () => {
+    const rows = await silence(30, 60);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.kind).toBe("asleep");
+    expect((rows[0]?.detail as { asleep_s?: number } | undefined)?.asleep_s).toBeGreaterThan(1_700);
+  });
+
+  it("★ uptime that kept running means it was ON but not reporting", async () => {
+    const rows = await silence(30, 1_800);
+    expect(rows.map((r) => r.kind)).toEqual(["unreported"]);
+  });
+
+  it("a short silence explains nothing", async () => {
+    expect(await silence(5, 60)).toEqual([]);
+  });
+
   it("★ a Mac clock far from the server's raises clock_skew — the agent's estimate is always 0", async () => {
     const f = await seed();
     const t = tick(f.deviceId);

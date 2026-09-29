@@ -254,6 +254,8 @@ export interface RuleWindow {
   days: string[];
   restricted_from: string;
   restricted_until: string;
+  /** ADR 0014 — after Until, flag startups and logins until this time. Null = no watch. */
+  watch_until?: string | null;
   crosses_midnight?: boolean;
   action: "lock" | "shutdown";
   shutdown_grace_s: number;
@@ -360,6 +362,8 @@ export interface ReportPayload {
     gapBuckets: number;
     /** Times the Mac was turned on in the window. */
     startups: number;
+    /** ★ Red rows: a startup, a login or a silence while on, during watch hours (ADR 0014). */
+    afterBedtime: number;
   };
   buckets: {
     bucket: string;

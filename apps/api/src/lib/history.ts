@@ -1,6 +1,7 @@
-import { and, desc, eq, gte, inArray, lt, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, lte, type SQL } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { devices, enforcementLog, policyVersions } from "../db/schema.js";
+import { type Restriction, type RestrictionDocument, restrictionAt } from "./restriction.js";
 
 /**
  * "What actually happened", as a parent reads it.
@@ -12,17 +13,21 @@ import { devices, enforcementLog, policyVersions } from "../db/schema.js";
  * into the handful of lines a parent actually wants, at READ time — so
  * history projected before this existed reads the same way, with no backfill.
  *
- * ⚠️ **"Turned on" comes from the server's own `power_on` rows** (see
- * `recordPowerOn` in `routes/sync.ts`: the Mac's uptime dropped between two
- * check-ins). NOT from the agent's `boot_id`: each daemon invents that per
- * PROCESS, and events spooled before a shutdown are stamped with the next
- * process's id when drained — trusting it produced a "turned on" BEFORE the
- * shutdown it followed, on real data (2026-09-28).
+ * ★ **Red means "during watch hours" (ADR 0014)** — after a rule's Until and
+ * before its Watch until, judged against the rules that were in force at that
+ * moment (`restriction.ts`). Three things turn red there: the Mac turned on,
+ * someone unlocked or logged in, or it was on but not reporting. Nothing else
+ * is ever red: a bedtime shutdown is the rules working.
  *
- * One inference is kept, for history recorded before `power_on` rows existed:
- * after a shutdown the ENFORCER itself ordered at bedtime, the next launch is
- * the boot. A stop with no enforced shutdown and no `power_on` after it is
- * never called a power cycle — it may have been an install or an upgrade.
+ * ⚠️ **"Turned on" comes from two places, never from `boot_id`** — each
+ * daemon invents that per PROCESS (ADR 0013):
+ * - the server's `power_on` row, written when uptime DROPS between check-ins;
+ * - the agent's own `boot_time` on `agent.started`, the kernel's boot time,
+ *   which still catches a boot the Mac never checked in from (turned on at
+ *   01:00 offline, shut down before morning) once its queue is delivered.
+ * The two are merged: boots within two minutes of each other are one boot.
+ * History from before either existed keeps one inference: the launch after a
+ * shutdown the ENFORCER ordered is the boot.
  */
 
 export type HistoryTone = "alarm" | "plain";
@@ -33,7 +38,7 @@ export interface HistoryRow {
   summary: string;
   deviceId: string;
   policyVersion: number | null;
-  /** ★ `alarm` rows are drawn red: the Mac turning on or off. */
+  /** ★ `alarm` rows are drawn red: something unwanted, during watch hours. */
   tone: HistoryTone;
 }
 
@@ -55,6 +60,8 @@ export interface DeviceContext {
   versionBefore: number | null;
   /** A removed device's last stop is its uninstall, not a shutdown. */
   removed: boolean;
+  /** The most recent known boot before the window, in ms. */
+  lastBootMs?: number | null;
 }
 
 /** Why a policy version was made — `policy_versions.publish_reason`, and whether a parent did it. */
@@ -62,6 +69,9 @@ export interface PolicyReason {
   reason: string;
   byParent: boolean;
 }
+
+/** Which rule, if any, restricted this device at this moment. */
+export type RestrictionLookup = (deviceId: string, at: Date) => Restriction | null;
 
 export const HISTORY_TEXT = {
   turnedOn: "Mac turned on",
@@ -72,6 +82,7 @@ export const HISTORY_TEXT = {
   stopped: "Parental controls stopped",
   removed: "Parental controls removed",
   registered: "Mac registered",
+  asleep: "Mac asleep",
   rules: {
     enrol: "Mac got its first rules",
     schedule_edit: "Mac got your new rules",
@@ -82,31 +93,44 @@ export const HISTORY_TEXT = {
   },
 } as const;
 
+/** "during Weekdays' watch hours" — the parent's own name for the rule. */
+export function duringWatch(label: string): string {
+  return `during ${label}'s watch hours`;
+}
+
 /** Rows of one stop within this long of each other are one stop. */
 const STOP_EPISODE_MS = 120_000;
-/** The enforcer's launch this soon after a power-on is that boot, not news. */
+/** The enforcer's launch this soon after a boot is that boot, not news. */
 const BOOT_LAUNCH_MS = 15 * 60_000;
+/** Two boot times this close are the same boot, seen two ways. */
+const SAME_BOOT_MS = 120_000;
+/** How finely an on-but-not-reporting gap is checked against watch hours. */
+const GAP_PROBE_MS = 5 * 60_000;
 
 const EMPTY_CONTEXT: DeviceContext = {
   hasHistoryBefore: false,
   versionBefore: null,
   removed: false,
 };
+const NOTHING_RESTRICTED: RestrictionLookup = () => null;
 
-function action(row: RawHistoryRow): string | null {
-  const value = (row.detail as Record<string, unknown> | null)?.action;
-  return typeof value === "string" ? value : null;
+function field(row: RawHistoryRow, key: string): unknown {
+  return (row.detail as Record<string, unknown> | null)?.[key];
 }
 
 function isStopPart(row: RawHistoryRow): boolean {
   return (
-    row.kind === "agent_stopping" || (row.kind === "action_taken" && action(row) === "shutdown")
+    row.kind === "agent_stopping" ||
+    (row.kind === "action_taken" && field(row, "action") === "shutdown")
   );
 }
 
-/** The sync daemon's one-off start at enrolment, as opposed to the enforcer's launch. */
-function isEnrolmentStart(row: RawHistoryRow): boolean {
-  return (row.detail as Record<string, unknown> | null)?.enrolled === true;
+/** "1 h 5 m" / "40 m". */
+function span(seconds: number): string {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  const hours = Math.floor(minutes / 60);
+  if (hours === 0) return `${minutes} m`;
+  return minutes % 60 === 0 ? `${hours} h` : `${hours} h ${minutes % 60} m`;
 }
 
 /** A presented row, plus where in the raw story it happened (for ties). */
@@ -114,12 +138,14 @@ type Sequenced = HistoryRow & { seq: number };
 
 /**
  * Present raw rows, ASCENDING by time, as the parent's history, NEWEST first.
- * Pure, so every rule below has a test that does not need a database.
+ * Pure: the rules in force come in as a function, so every rule below has a
+ * test that does not need a database.
  */
 export function presentHistory(
   rows: RawHistoryRow[],
   contexts: Map<string, DeviceContext> = new Map(),
   reasons: Map<string, PolicyReason> = new Map(),
+  restriction: RestrictionLookup = NOTHING_RESTRICTED,
 ): HistoryRow[] {
   const byDevice = new Map<string, RawHistoryRow[]>();
   for (const row of rows) {
@@ -130,7 +156,15 @@ export function presentHistory(
 
   const out: Sequenced[] = [];
   for (const [deviceId, list] of byDevice) {
-    out.push(...presentDevice(deviceId, list, contexts.get(deviceId) ?? EMPTY_CONTEXT, reasons));
+    out.push(
+      ...presentDevice(
+        deviceId,
+        list,
+        contexts.get(deviceId) ?? EMPTY_CONTEXT,
+        reasons,
+        restriction,
+      ),
+    );
   }
   // Newest first; within one instant, the row that came LATER in the story
   // first — so a lock and the shutdown in the same second read "locked, then
@@ -145,12 +179,13 @@ function presentDevice(
   rows: RawHistoryRow[],
   context: DeviceContext,
   reasons: Map<string, PolicyReason>,
+  restriction: RestrictionLookup,
 ): Sequenced[] {
   const out: Sequenced[] = [];
   let seq = 0;
   let seenAny = context.hasHistoryBefore;
   let lastVersion = context.versionBefore;
-  let lastPowerOn: Date | null = null;
+  let lastBoot: number | null = context.lastBootMs ?? null;
   let stop: { at: Date; lastAt: Date; lastSeq: number; bedtime: boolean } | null = null;
 
   const push = (
@@ -163,14 +198,31 @@ function presentDevice(
   ) =>
     out.push({ at: at.toISOString(), kind, summary, deviceId, policyVersion, tone, seq: rowSeq });
 
+  /** The watch rule this moment falls in, if any. */
+  const watching = (at: Date) => {
+    const found = restriction(deviceId, at);
+    return found?.phase === "watch" ? found : null;
+  };
+
+  /** "Mac turned on", red during watch hours. The one place a boot becomes a line. */
+  const turnedOn = (at: Date, rowSeq = seq) => {
+    lastBoot = at.getTime();
+    const watch = watching(at);
+    if (watch) {
+      push(at, "power_on", `${HISTORY_TEXT.turnedOn} ${duringWatch(watch.label)}`, "alarm", rowSeq);
+    } else {
+      push(at, "power_on", HISTORY_TEXT.turnedOn, "plain", rowSeq);
+    }
+  };
+  const isKnownBoot = (at: number) => lastBoot !== null && Math.abs(at - lastBoot) < SAME_BOOT_MS;
+
   /** The Mac went off: at the stop's start, sorted after anything else in it. */
   const shutDown = () => {
     if (!stop) return;
     const text = stop.bedtime ? HISTORY_TEXT.shutDownAtBedtime : HISTORY_TEXT.shutDown;
-    push(stop.at, "power_off", text, "alarm", stop.lastSeq);
+    push(stop.at, "power_off", text, "plain", stop.lastSeq);
     stop = null;
   };
-
   /** A stop nothing has explained yet — a bedtime shutdown is still known to be one. */
   const unexplainedStop = () => {
     if (!stop) return;
@@ -192,7 +244,7 @@ function presentDevice(
         stop = { at: row.occurredAt, lastAt: row.occurredAt, lastSeq: seq, bedtime: false };
       stop.lastAt = row.occurredAt;
       stop.lastSeq = seq;
-      if (action(row) === "shutdown") stop.bedtime = true;
+      if (field(row, "action") === "shutdown") stop.bedtime = true;
       seenAny = true;
       continue;
     }
@@ -200,29 +252,44 @@ function presentDevice(
     if (row.kind === "power_on") {
       // The server saw the uptime drop: whatever stop came before WAS the shutdown.
       shutDown();
-      push(row.occurredAt, "power_on", HISTORY_TEXT.turnedOn, "alarm");
-      lastPowerOn = row.occurredAt;
+      if (!isKnownBoot(row.occurredAt.getTime())) turnedOn(row.occurredAt);
       seenAny = true;
       continue;
     }
 
     if (row.kind === "agent_started") {
-      if (isEnrolmentStart(row)) {
+      const bootText = field(row, "boot_time");
+      const bootMs = typeof bootText === "string" ? Date.parse(bootText) : Number.NaN;
+      if (field(row, "enrolled") === true) {
         push(row.occurredAt, "registered", HISTORY_TEXT.registered, "plain");
-      } else if (
-        lastPowerOn !== null &&
-        row.occurredAt.getTime() - lastPowerOn.getTime() <= BOOT_LAUNCH_MS
-      ) {
-        // The enforcer launching at that boot — the power-on line already says it.
-        lastPowerOn = null;
+      } else if (!Number.isNaN(bootMs)) {
+        // ★ The agent says which boot it launched in (kern.boottime).
+        if (isKnownBoot(bootMs)) {
+          // This boot is already on record: the launch at boot is not news;
+          // a launch long after it is a restart.
+          if (stop) stop = null;
+          if (row.occurredAt.getTime() - bootMs > BOOT_LAUNCH_MS) {
+            push(row.occurredAt, "agent_restarted", HISTORY_TEXT.restarted, "plain");
+          }
+        } else if (!seenAny && lastBoot === null) {
+          // The first thing a device ever says: its install, not a power-on.
+          lastBoot = bootMs;
+          push(row.occurredAt, "agent_started", HISTORY_TEXT.started, "plain");
+        } else {
+          shutDown();
+          turnedOn(new Date(bootMs));
+        }
+      } else if (lastBoot !== null && row.occurredAt.getTime() - lastBoot <= BOOT_LAUNCH_MS) {
+        // An older agent's launch right after a known boot — that boot.
+        if (stop) stop = null;
       } else if (stop?.bedtime) {
-        // History from before `power_on` rows: the enforcer shut the Mac down,
-        // so its next launch is the Mac coming back on.
+        // History from before boot times existed: the enforcer shut the Mac
+        // down, so its next launch is the Mac coming back on.
         shutDown();
-        push(row.occurredAt, "power_on", HISTORY_TEXT.turnedOn, "alarm");
+        turnedOn(row.occurredAt);
       } else if (stop) {
-        // Stopped and started with no power-on between: an install, an
-        // upgrade, or launchd restarting it.
+        // Stopped and started with no boot between: an install, an upgrade,
+        // or launchd restarting it.
         stop = null;
         push(row.occurredAt, "agent_restarted", HISTORY_TEXT.restarted, "plain");
       } else {
@@ -235,6 +302,46 @@ function presentDevice(
         );
       }
       seenAny = true;
+      continue;
+    }
+
+    if (row.kind === "session_unlocked") {
+      // ★ Listed only during watch hours, and red there. The rest of the day
+      // it happens dozens of times and means nothing.
+      const watch = watching(row.occurredAt);
+      if (watch) {
+        const what = field(row, "from") === "asleep" ? "Mac used after waking" : "Mac unlocked";
+        push(row.occurredAt, "session_unlocked", `${what} ${duringWatch(watch.label)}`, "alarm");
+      }
+      seenAny = true;
+      continue;
+    }
+
+    if (row.kind === "asleep") {
+      const asleepS = Number(field(row, "asleep_s") ?? 0);
+      push(row.occurredAt, "asleep", `${HISTORY_TEXT.asleep} for ${span(asleepS)}`, "plain");
+      continue;
+    }
+
+    if (row.kind === "unreported") {
+      // Listed only if any of it fell in watch hours: the Mac was ON then and
+      // said nothing — Wi-Fi off, a blocked network.
+      const to = Date.parse(String(field(row, "to") ?? ""));
+      const end = Number.isNaN(to) ? row.occurredAt.getTime() : to;
+      let watch: Restriction | null = null;
+      for (let t = row.occurredAt.getTime(); t <= end && !watch; t += GAP_PROBE_MS) {
+        watch = watching(new Date(t));
+      }
+      watch ??= watching(new Date(end));
+      if (watch) {
+        const gapS = (end - row.occurredAt.getTime()) / 1000;
+        push(
+          row.occurredAt,
+          "unreported",
+          `Mac on but not reporting for ${span(gapS)} ${duringWatch(watch.label)}`,
+          "alarm",
+        );
+      }
       continue;
     }
 
@@ -304,6 +411,8 @@ export interface HistoryResult {
   rows: HistoryRow[];
   /** "Mac turned on", counted in the window. */
   startups: number;
+  /** ★ Red rows: unwanted, during watch hours. */
+  afterBedtime: number;
   /** True when more raw rows existed than were read — the counts are floors. */
   truncated: boolean;
 }
@@ -327,6 +436,34 @@ function rawRows(where: SQL | undefined, limit: number) {
     .limit(limit);
 }
 
+/**
+ * For each device, every document it was given, oldest first — so a moment is
+ * judged against the rules in force THEN, not the ones in force now.
+ */
+async function documentsFor(deviceIds: string[], upTo: Date | undefined) {
+  const rows = await db
+    .select({
+      deviceId: policyVersions.deviceId,
+      notBefore: policyVersions.notBefore,
+      document: policyVersions.document,
+    })
+    .from(policyVersions)
+    .where(
+      and(
+        inArray(policyVersions.deviceId, deviceIds),
+        ...(upTo ? [lte(policyVersions.notBefore, upTo)] : []),
+      ),
+    )
+    .orderBy(asc(policyVersions.notBefore));
+  const byDevice = new Map<string, { from: number; document: RestrictionDocument }[]>();
+  for (const row of rows) {
+    const list = byDevice.get(row.deviceId) ?? [];
+    list.push({ from: row.notBefore.getTime(), document: row.document as RestrictionDocument });
+    byDevice.set(row.deviceId, list);
+  }
+  return byDevice;
+}
+
 export async function loadHistory(request: HistoryRequest): Promise<HistoryResult> {
   const limit = request.limit ?? DEFAULT_LIMIT;
   const scope = [
@@ -344,6 +481,7 @@ export async function loadHistory(request: HistoryRequest): Promise<HistoryResul
   const deviceIds = [...new Set(rows.map((row) => row.deviceId))];
   const contexts = new Map<string, DeviceContext>();
   const reasons = new Map<string, PolicyReason>();
+  let restriction: RestrictionLookup = NOTHING_RESTRICTED;
 
   if (deviceIds.length > 0) {
     const statuses = await db
@@ -365,10 +503,22 @@ export async function loadHistory(request: HistoryRequest): Promise<HistoryResul
           .where(and(before, eq(enforcementLog.kind, "policy_applied")))
           .orderBy(desc(enforcementLog.occurredAt))
           .limit(1);
+        // The latest boot on record before the window, from either source.
+        const boots = await rawRows(
+          and(before, inArray(enforcementLog.kind, ["power_on", "agent_started"])),
+          5,
+        );
+        const bootTimes = boots.flatMap((row) => {
+          if (row.kind === "power_on") return [row.occurredAt.getTime()];
+          const text = (row.detail as Record<string, unknown> | null)?.boot_time;
+          const ms = typeof text === "string" ? Date.parse(text) : Number.NaN;
+          return Number.isNaN(ms) ? [] : [ms];
+        });
         contexts.set(deviceId, {
           hasHistoryBefore: previous !== undefined,
           versionBefore: applied?.version ?? null,
           removed: statuses.find((row) => row.id === deviceId)?.status === "decommissioned",
+          lastBootMs: bootTimes.length > 0 ? Math.max(...bootTimes) : null,
         });
       }),
     );
@@ -398,12 +548,24 @@ export async function loadHistory(request: HistoryRequest): Promise<HistoryResul
         });
       }
     }
+
+    const documents = await documentsFor(deviceIds, request.to);
+    restriction = (deviceId, at) => {
+      const list = documents.get(deviceId) ?? [];
+      let inForce: RestrictionDocument | null = null;
+      for (const entry of list) {
+        if (entry.from <= at.getTime()) inForce = entry.document;
+        else break;
+      }
+      return inForce ? restrictionAt(inForce, at) : null;
+    };
   }
 
-  const presented = presentHistory(rows, contexts, reasons);
+  const presented = presentHistory(rows, contexts, reasons, restriction);
   return {
     rows: presented,
     startups: presented.filter((row) => row.kind === "power_on").length,
+    afterBedtime: presented.filter((row) => row.tone === "alarm").length,
     truncated,
   };
 }

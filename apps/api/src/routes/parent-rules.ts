@@ -95,6 +95,7 @@ export async function handleGetRules(c: Context<{ Variables: ParentVariables }>)
           days: window.days,
           restricted_from: hhmm(window.restrictedFrom),
           restricted_until: hhmm(window.restrictedUntil),
+          watch_until: window.watchUntil ? hhmm(window.watchUntil) : null,
           crosses_midnight: window.crossesMidnight,
           action: window.action,
           shutdown_grace_s: window.shutdownGraceS,
@@ -118,6 +119,12 @@ const windowBody = z.object({
   days: z.array(z.enum(["sun", "mon", "tue", "wed", "thu", "fri", "sat"])).min(1),
   restricted_from: z.string().regex(/^\d{2}:\d{2}$/),
   restricted_until: z.string().regex(/^\d{2}:\d{2}$/),
+  /** ADR 0014 — optional; after `restricted_until`, flag startups and logins until this time. */
+  watch_until: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/)
+    .nullable()
+    .optional(),
   /**
    * ⚠️ **A.34 made structural.** `schedule_windows.action` carries the only
    * CHECK constraint in the schema, and the reason is that the vocabulary
@@ -171,6 +178,10 @@ export async function handleSaveRules(c: Context<{ Variables: ParentVariables }>
       // enforces nothing. Refusing is kinder than a rule that looks set.
       return fail(c, 422, `"${window.label}" starts and ends at the same time`);
     }
+    if (window.watch_until && window.watch_until === window.restricted_until) {
+      // A zero-length watch period watches nothing — same reasoning as above.
+      return fail(c, 422, `"${window.label}" stops watching the moment bedtime ends`);
+    }
   }
 
   await db.transaction(async (tx) => {
@@ -201,6 +212,7 @@ export async function handleSaveRules(c: Context<{ Variables: ParentVariables }>
           days: window.days,
           restrictedFrom: window.restricted_from,
           restrictedUntil: window.restricted_until,
+          watchUntil: window.watch_until ?? null,
           action: window.action,
           shutdownGraceS: window.shutdown_grace_s,
           escalateAfterFailures: window.escalate_after_failures,
@@ -536,6 +548,7 @@ export async function handleRestoreVersion(c: Context<{ Variables: ParentVariabl
           days: window.days ?? [],
           restrictedFrom: window.restricted_from ?? "21:30",
           restrictedUntil: window.restricted_until ?? "07:00",
+          watchUntil: window.watch_until ?? null,
           action: window.action ?? "lock",
           shutdownGraceS: window.action_options?.shutdown_grace_s ?? 300,
           escalateAfterFailures: window.action_options?.escalate_after_failures ?? 3,
@@ -573,6 +586,7 @@ interface RestorableWindow {
   days?: string[];
   restricted_from?: string;
   restricted_until?: string;
+  watch_until?: string;
   action?: string;
   action_options?: { shutdown_grace_s?: number; escalate_after_failures?: number };
   warnings?: { lead_minutes: number; channel?: string }[];

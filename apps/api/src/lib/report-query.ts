@@ -78,6 +78,8 @@ export interface ReportPayload {
     gapBuckets: number;
     /** ★ How many times the Mac was turned on in the window. */
     startups: number;
+    /** ★ Red rows: a startup, a login or a silence while awake, during watch hours (ADR 0014). */
+    afterBedtime: number;
   };
   buckets: UsageBucket[];
   /**
@@ -141,6 +143,7 @@ export async function reportQuery(request: ReportRequest): Promise<ReportPayload
       reportedBuckets: buckets.filter((b) => b.reported).length,
       gapBuckets: buckets.filter((b) => !b.reported).length,
       startups: history.startups,
+      afterBedtime: history.afterBedtime,
     },
     buckets,
     enforcement: history.rows,

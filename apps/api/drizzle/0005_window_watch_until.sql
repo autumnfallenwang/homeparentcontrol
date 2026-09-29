@@ -1,0 +1,1 @@
+ALTER TABLE "schedule_windows" ADD COLUMN "watch_until" time;

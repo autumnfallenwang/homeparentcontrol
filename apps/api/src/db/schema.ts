@@ -338,6 +338,11 @@ export const scheduleWindows = pgTable(
     days: text().array().notNull(), // ["sun","mon",…] — wire-identical
     restrictedFrom: time().notNull(),
     restrictedUntil: time().notNull(),
+    // ★ Optional. After `restricted_until`, keep WATCHING until this time: nothing is enforced,
+    //   but a startup or a login in between is flagged in the parent's history (ADR 0014). Null =
+    //   no watch period. Never read by the agent — it only rides along in the compiled document so
+    //   the server can tell what was in force at any past moment.
+    watchUntil: time(),
     // Derived ONCE so the UI, the compiler and the validator cannot each re-derive the wrap rule
     // slightly differently. Three re-derivations is how an off-by-one-night bug ships.
     //

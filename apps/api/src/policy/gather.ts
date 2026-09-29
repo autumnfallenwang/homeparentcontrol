@@ -136,6 +136,7 @@ export async function gatherCompilerInput(deviceId: string, now: Date): Promise<
       days: w.days,
       restrictedFrom: w.restrictedFrom,
       restrictedUntil: w.restrictedUntil,
+      watchUntil: w.watchUntil ?? null,
       // The generated column. Never re-derived here — that is the point of it.
       crossesMidnight: w.crossesMidnight ?? false,
       action: w.action,

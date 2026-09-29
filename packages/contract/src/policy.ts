@@ -54,6 +54,14 @@ export const scheduleWindow = z.object({
   days: z.array(weekday).min(1),
   restricted_from: timeOfDay,
   restricted_until: timeOfDay,
+  /**
+   * ★ Optional, ADDITIVE (R2), and never read by the agent. After
+   * `restricted_until`, the parent keeps WATCHING until this time: nothing is
+   * enforced, but a startup or a login in between is flagged in their history
+   * (ADR 0014). It rides in the signed document only so the server can tell
+   * what was in force at any past moment — rule rows are replaced on every save.
+   */
+  watch_until: timeOfDay.optional(),
   action: enforcementAction.default("lock"),
   action_options: actionOptions.optional(),
   warnings: z.array(warning).default([]),

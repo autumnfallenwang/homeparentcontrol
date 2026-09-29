@@ -291,6 +291,8 @@ export function compilePolicy(input: CompilerInput): PolicyDocument {
       days: canonicalDays(w.days),
       restricted_from: toHhMm(w.restrictedFrom),
       restricted_until: toHhMm(w.restrictedUntil),
+      // Only when set, so every document without a watch period is byte-identical to before.
+      ...(w.watchUntil ? { watch_until: toHhMm(w.watchUntil) } : {}),
       action: w.action,
       action_options: {
         shutdown_grace_s: w.shutdownGraceS,

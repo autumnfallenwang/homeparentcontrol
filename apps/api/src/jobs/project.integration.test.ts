@@ -422,6 +422,24 @@ d("projector — session_spans", () => {
     ]);
   });
 
+  /** ★ ADR 0014: an unlock is found even when the lock was in the previous hour. */
+  it("★ an unlock across the hour boundary becomes a session_unlocked row", async () => {
+    const f = await seed();
+    await emit(f, "session.state", { state: "active" }, new Date("2026-09-20T21:10:00.000Z"));
+    await emit(f, "session.state", { state: "locked" }, new Date("2026-09-20T21:50:00.000Z"));
+    await projectEvents();
+    await emit(f, "session.state", { state: "awake" }, new Date("2026-09-20T22:10:00.000Z"));
+    await projectEvents();
+
+    const rows = await db
+      .select({ kind: enforcementLog.kind, occurredAt: enforcementLog.occurredAt })
+      .from(enforcementLog)
+      .where(eq(enforcementLog.deviceId, f.deviceId));
+    expect(rows.map((r) => [r.kind, r.occurredAt.toISOString()])).toEqual([
+      ["session_unlocked", "2026-09-20T22:10:00.000Z"],
+    ]);
+  });
+
   /** ⚠️ A shifted start must not orphan the old row. */
   it("clears the bucket's spans before rewriting", async () => {
     const f = await seed();

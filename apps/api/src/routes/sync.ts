@@ -63,6 +63,11 @@ const CLOCK_SKEW_LIMIT_MS = 60_000;
  * rises within one boot (it pauses in sleep); the slack absorbs float noise.
  */
 const REBOOT_SLACK_S = 5;
+
+/** A silence shorter than this is a missed tick or two, not something to explain. */
+const GAP_MIN_S = 600;
+/** Wall time not matched by uptime, past this, was spent asleep. */
+const ASLEEP_MIN_S = 120;
 /** Borrowed from `schedule_windows.escalate_after_failures`, which defaults to 3. */
 const EVAL_FAILURES_LIMIT = 3;
 /** 3 × the enforcer's unconditional 60 s tick. */
@@ -134,6 +139,7 @@ export async function handleSync(c: Context): Promise<Response> {
       attendedUntil: devices.attendedUntil,
       childId: devices.childId,
       lastUptimeS: devices.lastUptimeS,
+      lastSyncAt: devices.lastSyncAt,
     })
     .from(devices)
     .where(eq(devices.id, deviceId));
@@ -146,6 +152,7 @@ export async function handleSync(c: Context): Promise<Response> {
 
   await recordTripwires(body, deviceId, device, skewMs);
   await recordPowerOn(body, deviceId, device);
+  await recordGap(body, deviceId, device);
   await applyConvergence(body, deviceId);
 
   // ⚠️ Observations only. `health_state`, `health_reason` and `health_since`
@@ -213,6 +220,65 @@ type DeviceRow = {
   systemBootTime: Date | null;
   appliedPolicyVersion: number | null;
 };
+
+/**
+ * What the Mac was doing while it did not check in (ADR 0014).
+ *
+ * The wall clock kept running through the silence; the Mac's uptime only runs
+ * while it is AWAKE (it pauses in sleep — observed on Ivy's Mac 2026-09-28,
+ * whose reported boot time moved forward by exactly the length of a sleep).
+ * So the difference between the two is the time it slept:
+ *
+ * - most of the gap asleep → `asleep`: the ordinary reason, never a problem;
+ * - awake for the whole gap → `unreported`: ON, but not reaching the server —
+ *   Wi-Fi off, a blocked network — the one that matters after bedtime.
+ *
+ * A reboot inside the gap is `recordPowerOn`'s, not this.
+ */
+async function recordGap(
+  body: SyncRequest,
+  deviceId: string,
+  device: DeviceRow & { childId: string; lastUptimeS: number | null; lastSyncAt: Date | null },
+): Promise<void> {
+  if (device.lastSyncAt === null || device.lastUptimeS === null) return;
+  const uptimeS = body.clock.continuous_ns / 1e9;
+  if (uptimeS + REBOOT_SLACK_S < device.lastUptimeS) return;
+
+  const wallS = (Date.now() - device.lastSyncAt.getTime()) / 1000;
+  if (wallS < GAP_MIN_S) return;
+  const awakeS = Math.max(0, uptimeS - device.lastUptimeS);
+  const asleepS = Math.max(0, wallS - awakeS);
+  const asleep = asleepS >= ASLEEP_MIN_S;
+
+  const from = device.lastSyncAt;
+  // Assumes it slept soon after its last check-in: the split of awake time
+  // before and after the sleep is not knowable, and this is the common case.
+  const to = new Date(from.getTime() + (asleep ? asleepS : wallS) * 1000);
+  await db.insert(enforcementLog).values({
+    householdId: device.householdId,
+    deviceId,
+    childId: device.childId,
+    eventId: randomUUID(),
+    kind: asleep ? "asleep" : "unreported",
+    occurredAt: from,
+    summary: asleep ? "Mac asleep" : "Mac on but not reporting",
+    detail: {
+      source: "server",
+      to: to.toISOString(),
+      gap_s: Math.round(wallS),
+      awake_s: Math.round(awakeS),
+      asleep_s: Math.round(asleepS),
+    },
+  });
+  log.info(
+    {
+      event: asleep ? "device.asleep" : "device.unreported",
+      device_id: deviceId,
+      gap_s: Math.round(wallS),
+    },
+    "explained a silence",
+  );
+}
 
 /**
  * "Mac turned on", recorded by the SERVER from the one signal that means it.

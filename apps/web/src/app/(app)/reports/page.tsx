@@ -15,10 +15,12 @@ import { defaultRange, HOURLY_MAX_DAYS, type LocalRange, parseRange } from "../.
  * `/reports` — D.2's **dashboard** sink: what one child's Macs did between a
  * start and an end the parent picks.
  *
- * Two summaries and the history, nothing else:
+ * Three summaries and the history, nothing else:
  * - **Active time**, which is use, not uptime (A.33);
- * - **Startups** — how many times the Mac was turned on. The owner asked for
- *   these to stand out, so the tile and the history lines are red.
+ * - **Startups** — how many times the Mac was turned on;
+ * - ★ **After bedtime** — what happened during a rule's watch hours (ADR
+ *   0014): a startup, a login, or the Mac on but not reporting. Red, as are
+ *   those lines in the history; nothing else on the page is.
  *
  * ⚠️ Renders from projected rollups, never raw events: raw samples are pruned
  * at 90 days and rollups outlive them, so a report built on raw data would
@@ -59,6 +61,7 @@ export default function ReportsPage() {
   }, [load]);
 
   const startups = payload?.totals.startups ?? 0;
+  const afterBedtime = payload?.totals.afterBedtime ?? 0;
   const floor = payload?.enforcementTruncated ?? false;
 
   return (
@@ -112,7 +115,7 @@ export default function ReportsPage() {
 
       {payload ? (
         <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-3">
             <Card>
               <h2
                 className="font-heading text-lg font-medium tracking-tight"
@@ -134,17 +137,27 @@ export default function ReportsPage() {
               ) : null}
             </Card>
 
-            <Card tone={startups > 0 ? "alarm" : "plain"}>
+            <Card>
               <h2 className="font-heading text-lg font-medium tracking-tight">Startups</h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 Times the Mac was turned on in this period.
               </p>
+              <p className="mt-3 text-3xl font-semibold tabular-nums text-foreground">
+                {floor ? `${startups}+` : startups}
+              </p>
+            </Card>
+
+            <Card tone={afterBedtime > 0 ? "alarm" : "plain"}>
+              <h2 className="font-heading text-lg font-medium tracking-tight">After bedtime</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Startups, logins, or the Mac on but silent, in a rule's watch hours.
+              </p>
               <p
                 className={`mt-3 text-3xl font-semibold tabular-nums ${
-                  startups > 0 ? "text-destructive" : "text-foreground"
+                  afterBedtime > 0 ? "text-destructive" : "text-foreground"
                 }`}
               >
-                {floor ? `${startups}+` : startups}
+                {floor ? `${afterBedtime}+` : afterBedtime}
               </p>
             </Card>
           </div>

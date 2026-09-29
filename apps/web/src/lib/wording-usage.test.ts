@@ -203,7 +203,9 @@ describe("phone width", () => {
       // A fixed pixel width, or a grid that is multi-column at every size,
       // is what breaks below 400px.
       expect(/\bw-\[\d{3,}px\]/.test(file.code), file.path).toBe(false);
-      expect(/className="[^"]*\bgrid-cols-[3-9]\b/.test(file.code), file.path).toBe(false);
+      // Unprefixed only: `sm:grid-cols-3` is one column on a phone, which is
+      // the point. The first version matched it too.
+      expect(/className="[^"]*(?<![\w:-])grid-cols-[3-9]\b/.test(file.code), file.path).toBe(false);
     }
   });
 });
