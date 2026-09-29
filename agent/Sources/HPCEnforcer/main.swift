@@ -179,16 +179,22 @@ enum Enforcer {
 
     static func start() {
         // §3.8 — report the previous run, then immediately mark this one dirty.
+        // ★ `boot_time` says WHICH boot this launch is in (ADR 0014), so the
+        // parent's history can tell "turned on" from "restarted" — even for a
+        // boot this Mac never checked in from, once its queue is delivered.
+        let bootTime = BootTime.kernelISO().map { ["boot_time": $0] } ?? [:]
         if let previous = Spool.readPreviousCleanExit() {
             Spool.append(
                 kind: "agent.started",
                 detail: [
                     "clean_exit_previous_run": String(previous.clean),
                     "previous_stop_reason": previous.reason ?? "",
-                ], tickSeq: 0)
+                ].merging(bootTime) { current, _ in current }, tickSeq: 0)
         } else {
+            let detail = ["clean_exit_previous_run": "false"]
             Spool.append(
-                kind: "agent.started", detail: ["clean_exit_previous_run": "false"], tickSeq: 0)
+                kind: "agent.started",
+                detail: detail.merging(bootTime) { current, _ in current }, tickSeq: 0)
         }
         Spool.writeCleanExit(clean: false, reason: nil, bootId: bootId)
 

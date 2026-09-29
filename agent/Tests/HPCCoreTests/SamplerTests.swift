@@ -173,6 +173,28 @@ struct SamplerTests {
         #expect(Self.session(output)?.text["state"] == "locked")
     }
 
+    /// ★ ADR 0014: a login after bedtime is seen through `session.state`. With
+    /// "Collect usage data" off, the sampler used not to run at all, so it
+    /// was invisible. Now only the app list answers to that switch.
+    @Test("★ with usage data OFF, lock and unlock are still recorded — the app list is not")
+    func usageOffStillRecordsSession() {
+        let f = PolicyDocument.Telemetry.fallback
+        let off = PolicyDocument.Telemetry(
+            enabled: false, sampleIntervalS: f.sampleIntervalS, flushIntervalS: f.flushIntervalS,
+            collect: f.collect, maxQueueEvents: f.maxQueueEvents, maxQueueBytes: f.maxQueueBytes,
+            maxQueueAgeDays: f.maxQueueAgeDays, auditRetentionDays: f.auditRetentionDays)
+        let settled = Sampler.sample(
+            Self.observation(at: 0, uptime: 1_000), state: .init(), telemetry: off).state
+
+        let locked = Sampler.sample(Self.observation(locked: true), state: settled, telemetry: off)
+        #expect(Self.session(locked)?.text["state"] == "locked")
+
+        let unlocked = Sampler.sample(
+            Self.observation(at: 120, uptime: 1_120), state: locked.state, telemetry: off)
+        #expect(Self.session(unlocked)?.text["state"] != nil)
+        #expect(Self.usage(unlocked) == nil)
+    }
+
     @Test("no console user is the login window, which is locked")
     func loginWindowIsLocked() {
         let output = Sampler.sample(

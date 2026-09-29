@@ -117,8 +117,10 @@ public enum Sampler {
         if let lastAt = state.lastAt, span > 0 || state.lastUptime != nil {
             let wall = observation.at.timeIntervalSince(lastAt)
             let monotonic = observation.uptime - (state.lastUptime ?? observation.uptime)
+            // ★ Lock, unlock and sleep are recorded whatever "Collect usage
+            // data" says (ADR 0014): they are how a login after bedtime is
+            // seen at all. Only the app list below answers to that switch.
             if wall - monotonic > sleepDetectionSlackS,
-               telemetry.collects("session.state"),
                state.sessionState != .asleep
             {
                 events.append(
@@ -137,7 +139,7 @@ public enum Sampler {
         // each span's end from the NEXT transition — so a stream of identical
         // states produces a stream of zero-length spans.
         let current = classify(observation)
-        if current != state.sessionState, telemetry.collects("session.state") {
+        if current != state.sessionState {
             var text = ["state": current.rawValue]
             if let user = observation.consoleUser { text["console_user"] = user }
             events.append(

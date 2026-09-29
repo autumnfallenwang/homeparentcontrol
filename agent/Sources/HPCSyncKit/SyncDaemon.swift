@@ -103,7 +103,11 @@ public enum SyncDaemon {
     static func sampleTick() {
         guard let queue else { return }
         let config = telemetry()
-        guard config.enabled else { return }
+        // ⚠️ No `guard config.enabled` here any more (ADR 0014). With "Collect
+        // usage data" off, the sampler used not to run at all — so lock,
+        // unlock and sleep went unrecorded too, and a login after bedtime was
+        // invisible. The switch now governs the app list only; `Sampler`
+        // applies it to `app.usage_sample` and nothing else.
 
         let observation = SampleSource.observe()
         let output = Sampler.sample(observation, state: samplerState, telemetry: config)
