@@ -72,8 +72,10 @@ export const ENFORCEMENT_LOG_KINDS: Readonly<Record<string, string>> = Object.fr
   "agent.stopping": "agent_stopping",
   "clock.stepped": "clock_stepped",
   // ADR 0015 — the moves around the rules, from agent 0.2.0. `clock.corrected`
-  // is deliberately absent: the clock coming right shows as a `clock.stepped`
-  // back to zero, and how the agent fixed it is for `events`, not the parent.
+  // is here because it is often the ONLY record of a moved clock: sync can put
+  // it right before the enforcer's next tick measures it (Ivy's Mac, 03:35 on
+  // 2026-10-03 — 22 h fast, and no `clock.stepped` at all).
+  "clock.corrected": "clock_corrected",
   "clock.network_time_off": "network_time_off",
   "clock.timezone_changed": "timezone_changed",
   "override.granted": "override_granted",

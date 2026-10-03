@@ -91,6 +91,7 @@ export const HISTORY_TEXT = {
   registered: "Mac registered",
   asleep: "Mac asleep",
   clockRight: "Mac's clock back to the real time",
+  clockPutRight: "Mac's clock put right",
   networkTimeOff: "“Set time automatically” turned off",
   rules: {
     enrol: "Mac got its first rules",
@@ -106,6 +107,12 @@ export const HISTORY_TEXT = {
 export function clockSetText(offsetS: number): string {
   const direction = offsetS > 0 ? "ahead" : "behind";
   return `Mac's clock set ${span(Math.abs(offsetS))} ${direction}`;
+}
+
+/** "Mac's clock was 22 h ahead — put right". */
+export function clockWasText(offsetS: number): string {
+  const direction = offsetS > 0 ? "ahead" : "behind";
+  return `Mac's clock was ${span(Math.abs(offsetS))} ${direction} — put right`;
 }
 
 /** "America/Los_Angeles" → "Los Angeles". */
@@ -134,6 +141,8 @@ const SAME_BOOT_MS = 120_000;
 const GAP_PROBE_MS = 5 * 60_000;
 /** A clock this close to the real time is right — the server's `CLOCK_SKEW_LIMIT_MS`. */
 const CLOCK_RIGHT_S = 60;
+/** A correction this soon after a red clock row is the same incident. */
+const CLOCK_INCIDENT_MS = 15 * 60_000;
 /**
  * After the lock or shutdown is due, how long before use is "should not have
  * been possible". The enforcer ticks every 60 s and re-locks every tick, so a
@@ -225,6 +234,7 @@ function presentDevice(
   let lastVersion = context.versionBefore;
   let lastBoot: number | null = context.lastBootMs ?? null;
   let stop: { at: Date; lastAt: Date; lastSeq: number; bedtime: boolean } | null = null;
+  let lastClockAlarm: number | null = null;
 
   const push = (
     at: Date,
@@ -363,6 +373,20 @@ function presentDevice(
         push(row.occurredAt, "clock_right", HISTORY_TEXT.clockRight, "plain");
       } else {
         push(row.occurredAt, "clock_changed", clockSetText(offsetS), "alarm");
+        lastClockAlarm = row.occurredAt.getTime();
+      }
+      continue;
+    }
+    if (row.kind === "clock_corrected") {
+      // ★ Often the only record: sync can put the clock right before the
+      // enforcer measures it. Red then; plain when the change is already red.
+      const offsetS = Number(field(row, "offset_s") ?? 0);
+      const sameIncident =
+        lastClockAlarm !== null && row.occurredAt.getTime() - lastClockAlarm <= CLOCK_INCIDENT_MS;
+      if (Math.abs(offsetS) <= CLOCK_RIGHT_S || sameIncident) {
+        push(row.occurredAt, "clock_corrected", HISTORY_TEXT.clockPutRight, "plain");
+      } else {
+        push(row.occurredAt, "clock_corrected", clockWasText(offsetS), "alarm");
       }
       continue;
     }

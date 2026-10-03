@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   bedtimeUse,
   clockSetText,
+  clockWasText,
   type DeviceContext,
   duringWatch,
   HISTORY_TEXT,
@@ -276,6 +277,26 @@ describe("presentHistory — the moves around the rules, red at any hour (ADR 00
     ]);
     expect(story(out)).toEqual(["Time zone changed to Los Angeles [red]"]);
     expect(zoneName("Pacific/Honolulu")).toBe("Honolulu");
+  });
+
+  const corrected = (minute: number, offsetS: number) =>
+    row("clock_corrected", at(minute), {
+      detail: { method: "network_time_on", offset_s: offsetS },
+    });
+
+  it("★ Ivy's install: the clock fixed before the enforcer measured it — the fix is the red row", () => {
+    expect(story(present([row("network_time_off", at(5)), corrected(5, 79_196)]))).toEqual([
+      `${HISTORY_TEXT.networkTimeOff} [red]`,
+      `${clockWasText(79_196)} [red]`,
+    ]);
+    expect(clockWasText(79_196)).toBe("Mac's clock was 22 h ahead — put right");
+  });
+
+  it("a fix after a red clock row is the same incident: plain", () => {
+    expect(story(present([stepped(5, 3600), corrected(6, 3600)]))).toEqual([
+      `${clockSetText(3600)} [red]`,
+      HISTORY_TEXT.clockPutRight,
+    ]);
   });
 
   it("an agent clock_stepped with no offset (none was ever sent) is skipped, not misread", () => {

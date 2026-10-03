@@ -22,6 +22,15 @@ extension SyncDaemon {
     /// `clock_skew` (`CLOCK_SKEW_LIMIT_MS`).
     static let correctAfter: TimeInterval = 60
 
+    /// ⚠️ Hands off the clock for this long after this daemon starts.
+    ///
+    /// Found installing 0.2.0 on Ivy's Mac, 2026-10-03: the pkg's postinstall
+    /// starts sync, sync fixed a clock 22 h fast within five seconds — and
+    /// `/usr/sbin/installer`, which had not yet noticed the install was done,
+    /// was waiting on a wall-clock timer that now ended 22 h later. It hung.
+    /// Enforcement never waits for the fix, so waiting costs nothing.
+    static let correctionGraceS: TimeInterval = 120
+
     static var lastNetworkTime: Bool?
     static var lastZone: String?
     static var lastDeadfallOffset: TimeInterval = 0
@@ -50,18 +59,20 @@ extension SyncDaemon {
 
     /// Once per tick, after the sync attempt.
     static func superviseClock(_ clock: TrustedClock.Resolution, networkTime: Bool?) {
+        let settled = TimeBasis.continuous() - startedContinuous >= correctionGraceS
+
         // ── 1. Automatic time turned off: the first step of the trick. Say so
         //       once, and turn it back on — macOS then fixes the clock itself.
         if networkTime == false {
             if lastNetworkTime != false {
                 enqueueLocal(type: "clock.network_time_off", cls: .audit, data: [:])
             }
-            if turnOnNetworkTime() {
+            if settled, turnOnNetworkTime() {
                 enqueueLocal(
                     type: "clock.corrected", cls: .audit,
                     data: ["method": "network_time_on", "offset_s": Int(clock.offset.rounded())])
             }
-        } else if abs(clock.offset) > correctAfter, clock.source == .server,
+        } else if settled, abs(clock.offset) > correctAfter, clock.source == .server,
                   clock.serverCorroborated
         {
             // ── 2. Automatic time is on (or unreadable) and the clock is still

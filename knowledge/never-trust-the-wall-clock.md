@@ -20,7 +20,10 @@ fix (§3.2 step 4) and no code did. The same root cause had five more faces, all
   Chrome use as "Saturday 23:45" and showed nothing red;
 - `URLSession` served a **cached** `GET /health` after every backwards step, so a `server_time` read
   through it was stale by the cache's age. Sync is a POST (never cached); `/health` now sends
-  `no-store`.
+  `no-store`;
+- and fixing the clock bites too: installing 0.2.0 on Ivy's Mac, sync put a 22-h-fast clock right
+  five seconds after the postinstall started it, and `/usr/sbin/installer` — done, but not yet told —
+  hung on a wall-clock wait (`install.log` showed it finished). Sync now waits 120 s after start.
 
 **How to apply:** any new `Date()` in `agent/Sources` needs a reason in a comment. Ask of every one:
 *if the child moves the clock by a day either way, what does this line do?* And a second witness is

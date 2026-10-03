@@ -455,6 +455,8 @@ function summarise(kind: string, data: unknown): string {
         ? "Clock back to the real time"
         : `Clock set ${Math.round(Math.abs(offset) / 60)} min ${offset > 0 ? "ahead" : "behind"}`;
     }
+    case "clock_corrected":
+      return `Clock put right (${String(d.method ?? "?")}, was off by ${d.offset_s ?? "?"} s)`;
     case "network_time_off":
       return "Set time automatically was turned off";
     case "timezone_changed":
