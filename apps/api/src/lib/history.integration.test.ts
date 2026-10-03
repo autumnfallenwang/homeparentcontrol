@@ -258,8 +258,14 @@ d("history, projected from real events", () => {
         overrides: [],
       },
     });
-    // T0 is 21:00 UTC. Locked at 21:10, turned on at 21:30, unlocked at 21:40,
-    // and in the afternoon an unlock that must not be listed.
+    // T0 is 21:00 UTC. Locked at bedtime, turned on at 21:30, unlocked at
+    // 21:40, and in the afternoon an unlock that must not be listed.
+    //
+    // ⚠️ The lock at 21:00 is what a real enforcer records. This fixture used
+    // to lock only at 21:10 — leaving the afternoon's unlock open straight
+    // through the 21:00–21:05 window, which ADR 0015 correctly reads as
+    // "in use during bedtime". That case has its own test, below.
+    await emit(f, "session.state", { state: "locked" }, minutes(0));
     await emit(f, "session.state", { state: "locked" }, minutes(10));
     await db.insert(enforcementLog).values({
       householdId: f.householdId,
@@ -292,5 +298,64 @@ d("history, projected from real events", () => {
     expect(payload.totals.startups).toBe(1);
     // The afternoon unlock is not listed at all.
     expect(payload.enforcement.filter((row) => row.kind === "session_unlocked")).toHaveLength(1);
+  });
+
+  /**
+   * ★ ADR 0015 end to end: the Mac never locked at bedtime — whatever the
+   * trick — and was unlocked through the window. Red, through the real loader.
+   */
+  it("★ unlocked straight through an enforced window is red: in use during bedtime", async () => {
+    const f = await seed();
+    const [set] = await db
+      .select({ id: policySets.id })
+      .from(policySets)
+      .where(eq(policySets.childId, f.childId));
+    await db.insert(policyVersions).values({
+      householdId: f.householdId,
+      deviceId: f.deviceId,
+      policySetId: set?.id ?? "",
+      version: 1,
+      documentHash: "test",
+      etag: 'W/"pol-test-v1"',
+      notBefore: minutes(-600),
+      document: {
+        timezone: "UTC",
+        schedule: {
+          kind: "windows",
+          windows: [
+            {
+              id: "5f0b1b7c-0000-4000-8000-000000000001",
+              label: "School nights",
+              days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+              restricted_from: "21:00",
+              restricted_until: "21:30",
+              action: "shutdown",
+              action_options: { shutdown_grace_s: 300, escalate_after_failures: 3 },
+            },
+          ],
+        },
+        overrides: [],
+      },
+    });
+    // Unlocked at 20:50 and never locked: no lock at 21:00, no shutdown at 21:05.
+    await emit(f, "session.state", { state: "locked" }, minutes(-20));
+    await emit(f, "session.state", { state: "awake" }, minutes(-10));
+    await emit(f, "session.state", { state: "locked" }, minutes(40));
+    await projectEvents();
+
+    const payload = await reportQuery({
+      householdId: f.householdId,
+      childId: f.childId,
+      from: minutes(-60),
+      to: minutes(120),
+      grain: "hour",
+    });
+    const red = payload.enforcement.filter((row) => row.tone === "alarm");
+    expect(red.map((row) => row.summary)).toEqual([
+      "Mac in use during School nights's bedtime — it should have been off",
+    ]);
+    // At the first moment it should not have been possible: 21:05 shutdown + 2 min.
+    expect(red[0]?.at).toBe(minutes(7).toISOString());
+    expect(payload.totals.afterBedtime).toBe(1);
   });
 });

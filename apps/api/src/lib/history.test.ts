@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  bedtimeUse,
+  clockSetText,
   type DeviceContext,
   duringWatch,
   HISTORY_TEXT,
@@ -7,6 +9,8 @@ import {
   presentHistory,
   type RawHistoryRow,
   type RestrictionLookup,
+  usedInBedtime,
+  zoneName,
 } from "./history.js";
 
 const DEVICE = "d1";
@@ -240,5 +244,98 @@ describe("presentHistory — shape", () => {
   it("with no rules in force, nothing is red", () => {
     const out = presentHistory([poweredOn(35), unlocked(40)], known());
     expect(out.some((r) => r.tone === "alarm")).toBe(false);
+  });
+});
+
+describe("presentHistory — the moves around the rules, red at any hour (ADR 0015)", () => {
+  const stepped = (minute: number, offsetS: number) =>
+    row("clock_stepped", at(minute), { detail: { offset_s: String(offsetS), source: "server" } });
+
+  it("★ tonight: a clock set 23 h ahead is red, at any hour — then put back, plain", () => {
+    const out = present([stepped(5, 82_800), stepped(6, 0)]);
+    expect(story(out)).toEqual([`${clockSetText(82_800)} [red]`, HISTORY_TEXT.clockRight]);
+    expect(clockSetText(82_800)).toBe("Mac's clock set 23 h ahead");
+    expect(clockSetText(-1800)).toBe("Mac's clock set 30 m behind");
+  });
+
+  it("a wobble inside a minute is the clock being right, never red", () => {
+    expect(story(present([stepped(5, 45)]))).toEqual([HISTORY_TEXT.clockRight]);
+  });
+
+  it("“Set time automatically” turned off is red", () => {
+    expect(story(present([row("network_time_off", at(5))]))).toEqual([
+      `${HISTORY_TEXT.networkTimeOff} [red]`,
+    ]);
+  });
+
+  it("a time zone change is red, and names the place", () => {
+    const out = present([
+      row("timezone_changed", at(5), {
+        detail: { from: "America/New_York", to: "America/Los_Angeles" },
+      }),
+    ]);
+    expect(story(out)).toEqual(["Time zone changed to Los Angeles [red]"]);
+    expect(zoneName("Pacific/Honolulu")).toBe("Honolulu");
+  });
+
+  it("an agent clock_stepped with no offset (none was ever sent) is skipped, not misread", () => {
+    expect(present([row("clock_stepped", at(5))])).toEqual([]);
+  });
+});
+
+describe("bedtimeUse — in use when it should have been off (ADR 0015)", () => {
+  /** Enforced 20–30 with a 5-minute grace: the shutdown is due at minute 25. */
+  const shutdownRule =
+    (action = "shutdown"): RestrictionLookup =>
+    (_d, when) => {
+      const minute = (when.getTime() - at(0).getTime()) / 60_000;
+      if (minute >= 20 && minute < 30)
+        return {
+          phase: "enforced",
+          windowId: "w",
+          label: "Weekdays",
+          enforcedFrom: at(20).getTime(),
+          action,
+          graceS: 300,
+        };
+      return null;
+    };
+  const span = (from: number, to: number | null) => ({
+    deviceId: DEVICE,
+    startedAt: at(from),
+    endedAt: to === null ? null : at(to),
+  });
+
+  it("★ unlocked after the shutdown was due (plus slack): one red row, at the first moment", () => {
+    const rows = bedtimeUse([span(15, 29)], shutdownRule(), at(59));
+    expect(rows.map((r) => r.occurredAt)).toEqual([at(27)]);
+    expect(story(present(rows))).toEqual([`${usedInBedtime("Weekdays", "shutdown")} [red]`]);
+    expect(usedInBedtime("Weekdays", "shutdown")).toBe(
+      "Mac in use during Weekdays's bedtime — it should have been off",
+    );
+  });
+
+  it("★ inside the grace she may unlock — the ladder working, not a bypass", () => {
+    expect(bedtimeUse([span(20, 26)], shutdownRule(), at(59))).toEqual([]);
+  });
+
+  it("a lock rule counts from the lock itself", () => {
+    const rows = bedtimeUse([span(21, 29)], shutdownRule("lock"), at(59));
+    expect(rows.map((r) => r.occurredAt)).toEqual([at(22)]);
+    expect(rows[0]?.summary).toBe(
+      "Mac in use during Weekdays's bedtime — it should have been locked",
+    );
+  });
+
+  it("warn-only rules never flag use — nothing was supposed to stop her", () => {
+    expect(bedtimeUse([span(15, 29)], shutdownRule("warn_only"), at(59))).toEqual([]);
+  });
+
+  it("one row per rule per night, however many spans", () => {
+    expect(bedtimeUse([span(26, 27), span(28, 29)], shutdownRule(), at(59))).toHaveLength(1);
+  });
+
+  it("an open span runs to now", () => {
+    expect(bedtimeUse([span(24, null)], shutdownRule(), at(28))).toHaveLength(1);
   });
 });

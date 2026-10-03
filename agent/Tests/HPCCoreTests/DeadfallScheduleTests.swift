@@ -48,6 +48,20 @@ struct DeadfallScheduleTests {
         #expect(nights == [6])
     }
 
+    /// ★ ADR 0015. launchd fires on the Mac's clock; with it two hours slow,
+    /// a 21:30 entry would fire at 23:30 real time.
+    @Test("★ a clock two hours slow moves the entry to the wall time that will read at 21:30")
+    func wallOffsetShiftsEntries() {
+        let policy = PredicateTests.schoolNights(
+            days: ["sun", "mon", "tue", "wed", "thu", "fri", "sat"])
+        let slow = DeadfallSchedule.entries(
+            policy: policy, now: Self.monday, systemZone: Self.ny, wallOffset: -7200)
+        #expect(slow.contains(where: { $0.hour == 19 && $0.minute == 30 }))
+        #expect(!slow.contains(where: { $0.hour == 21 && $0.minute == 30 }))
+        // No offset: unchanged.
+        #expect(Self.entries(policy).contains(where: { $0.hour == 21 && $0.minute == 30 }))
+    }
+
     @Test("every Calendar weekday maps to launchd's, per `man launchd.plist`")
     func mappingTable() {
         // Calendar: 1 Sun, 2 Mon … 7 Sat.  launchd: 7 (or 0) Sun, 1 Mon … 6 Sat.

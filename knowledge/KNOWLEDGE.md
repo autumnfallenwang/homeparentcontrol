@@ -62,3 +62,5 @@ The skill picks a slug, writes the file with the right frontmatter, and updates 
 | [loki-labels-are-not-what-the-spec-says](./loki-labels-are-not-what-the-spec-says.md) | `reference` | Only `namespace`/`pod`/`container`/`node` exist — and `or vector(0)` hides a wrong selector for ever |
 | [strings-cannot-prove-swift-absence](./strings-cannot-prove-swift-absence.md) | `reference` | Swift packs literals ≤15 bytes into instruction immediates — use `nm` and `otool -tV` |
 | [launchd-on-a-real-mac](./launchd-on-a-real-mac.md) | `reference` | `setenv` refused by SIP, payload plists reset on upgrade, bootstrap EIO, screen-lock delay, no os_log, launchd `Weekday` ≠ `Calendar`, daemon ≠ Terminal for GUI |
+| [never-trust-the-wall-clock](./never-trust-the-wall-clock.md) | `feedback` | On the agent `Date()` is the child's input — a clock set 23 h ahead skipped a shutdown, stalled uploads and hid her from the review list |
+| [macos-clocks](./macos-clocks.md) | `reference` | Which clock moves with a manual step (wall, `kern.boottime`), which counts sleep (continuous), and how fast each fix works |

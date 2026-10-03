@@ -1,6 +1,6 @@
-import { and, asc, desc, eq, gte, inArray, lt, lte, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, type SQL } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { devices, enforcementLog, policyVersions } from "../db/schema.js";
+import { devices, enforcementLog, policyVersions, sessionSpans } from "../db/schema.js";
 import { type Restriction, type RestrictionDocument, restrictionAt } from "./restriction.js";
 
 /**
@@ -13,11 +13,18 @@ import { type Restriction, type RestrictionDocument, restrictionAt } from "./res
  * into the handful of lines a parent actually wants, at READ time — so
  * history projected before this existed reads the same way, with no backfill.
  *
- * ★ **Red means "during watch hours" (ADR 0014)** — after a rule's Until and
- * before its Watch until, judged against the rules that were in force at that
- * moment (`restriction.ts`). Three things turn red there: the Mac turned on,
- * someone unlocked or logged in, or it was on but not reporting. Nothing else
- * is ever red: a bedtime shutdown is the rules working.
+ * ★ **Red means "worth a look"** — the parent's review list.
+ * - **During watch hours (ADR 0014)** — after a rule's Until and before its
+ *   Watch until, judged against the rules in force at that moment
+ *   (`restriction.ts`): the Mac turned on, someone unlocked or logged in, or
+ *   it was on but not reporting.
+ * - **At any hour (ADR 0015)** — the tricks around the rules themselves: the
+ *   clock set away from the real time, "Set time automatically" turned off,
+ *   the time zone changed, and the Mac in use during bedtime after it should
+ *   already have locked or shut down — the catch-all for a trick nobody has
+ *   thought of yet.
+ * A bedtime shutdown is the rules working, so it is never red; nor is the
+ * clock being put back right.
  *
  * ⚠️ **"Turned on" comes from two places, never from `boot_id`** — each
  * daemon invents that per PROCESS (ADR 0013):
@@ -83,6 +90,8 @@ export const HISTORY_TEXT = {
   removed: "Parental controls removed",
   registered: "Mac registered",
   asleep: "Mac asleep",
+  clockRight: "Mac's clock back to the real time",
+  networkTimeOff: "“Set time automatically” turned off",
   rules: {
     enrol: "Mac got its first rules",
     schedule_edit: "Mac got your new rules",
@@ -92,6 +101,23 @@ export const HISTORY_TEXT = {
     other: "Mac got updated rules",
   },
 } as const;
+
+/** "Mac's clock set 23 h ahead" — how far, and which way, from the real time. */
+export function clockSetText(offsetS: number): string {
+  const direction = offsetS > 0 ? "ahead" : "behind";
+  return `Mac's clock set ${span(Math.abs(offsetS))} ${direction}`;
+}
+
+/** "America/Los_Angeles" → "Los Angeles". */
+export function zoneName(zone: string): string {
+  return (zone.split("/").pop() ?? zone).replace(/_/g, " ");
+}
+
+/** "Mac in use during Weekdays' bedtime — it should have been off". */
+export function usedInBedtime(label: string, action: string): string {
+  const should = action === "shutdown" ? "off" : "locked";
+  return `Mac in use during ${label}'s bedtime — it should have been ${should}`;
+}
 
 /** "during Weekdays' watch hours" — the parent's own name for the rule. */
 export function duringWatch(label: string): string {
@@ -106,6 +132,18 @@ const BOOT_LAUNCH_MS = 15 * 60_000;
 const SAME_BOOT_MS = 120_000;
 /** How finely an on-but-not-reporting gap is checked against watch hours. */
 const GAP_PROBE_MS = 5 * 60_000;
+/** A clock this close to the real time is right — the server's `CLOCK_SKEW_LIMIT_MS`. */
+const CLOCK_RIGHT_S = 60;
+/**
+ * After the lock or shutdown is due, how long before use is "should not have
+ * been possible". The enforcer ticks every 60 s and re-locks every tick, so a
+ * child who unlocks gets up to a minute by design; two minutes is past that.
+ */
+const BEDTIME_USE_SLACK_MS = 120_000;
+/** How finely an unlocked span is checked against bedtime. */
+const BEDTIME_PROBE_MS = 60_000;
+/** Spans longer than this are probed only this far — an open span with no end. */
+const BEDTIME_PROBE_CAP_MS = 24 * 3_600_000;
 
 const EMPTY_CONTEXT: DeviceContext = {
   hasHistoryBefore: false,
@@ -317,6 +355,41 @@ function presentDevice(
       continue;
     }
 
+    // ── ADR 0015: the tricks around the rules. Red at any hour.
+    if (row.kind === "clock_stepped") {
+      const offsetS = Number(field(row, "offset_s") ?? Number.NaN);
+      if (Number.isNaN(offsetS)) continue;
+      if (Math.abs(offsetS) <= CLOCK_RIGHT_S) {
+        push(row.occurredAt, "clock_right", HISTORY_TEXT.clockRight, "plain");
+      } else {
+        push(row.occurredAt, "clock_changed", clockSetText(offsetS), "alarm");
+      }
+      continue;
+    }
+    if (row.kind === "network_time_off") {
+      push(row.occurredAt, "network_time_off", HISTORY_TEXT.networkTimeOff, "alarm");
+      continue;
+    }
+    if (row.kind === "timezone_changed") {
+      const to = String(field(row, "to") ?? "");
+      push(
+        row.occurredAt,
+        "timezone_changed",
+        to ? `Time zone changed to ${zoneName(to)}` : "Time zone changed",
+        "alarm",
+      );
+      continue;
+    }
+    if (row.kind === "used_in_bedtime") {
+      push(
+        row.occurredAt,
+        "used_in_bedtime",
+        usedInBedtime(String(field(row, "label") ?? "Bedtime"), String(field(row, "action"))),
+        "alarm",
+      );
+      continue;
+    }
+
     if (row.kind === "asleep") {
       const asleepS = Number(field(row, "asleep_s") ?? 0);
       push(row.occurredAt, "asleep", `${HISTORY_TEXT.asleep} for ${span(asleepS)}`, "plain");
@@ -392,6 +465,65 @@ function rulesText(why: PolicyReason | undefined): string {
     default:
       return HISTORY_TEXT.rules.other;
   }
+}
+
+/** An unlocked stretch — `awake` or `active` — from `session_spans`. */
+export interface UnlockedSpan {
+  deviceId: string;
+  startedAt: Date;
+  /** Null while still open. */
+  endedAt: Date | null;
+}
+
+/**
+ * ★ "Mac in use during bedtime" (ADR 0015) — the catch-all.
+ *
+ * Whatever the trick — a clock moved, a trick nobody has found yet — the
+ * Mac being unlocked when it should already have been off or locked is the
+ * one thing every bypass has in common. One row per rule per night, at the
+ * first offending moment. Pure, like `presentHistory`.
+ *
+ * ⚠️ Inside the lock → shutdown grace she CAN unlock: the lock costs her a
+ * password, and the enforcer re-locks within a minute. That is the ladder
+ * working, so use only counts from the shutdown (or, for a lock rule, the
+ * lock) plus `BEDTIME_USE_SLACK_MS`.
+ *
+ * ⚠️ Judged on the agent's `ts`. From agent 0.2.0 that is trusted time; an
+ * older agent on a moved clock files its spans at the hour she chose, and
+ * this cannot see them — which is the incident that made 0.2.0.
+ */
+export function bedtimeUse(
+  spans: UnlockedSpan[],
+  restriction: RestrictionLookup,
+  now: Date = new Date(),
+): RawHistoryRow[] {
+  const out: RawHistoryRow[] = [];
+  const seen = new Set<string>();
+  for (const span of spans) {
+    const start = span.startedAt.getTime();
+    const end = Math.min((span.endedAt ?? now).getTime(), start + BEDTIME_PROBE_CAP_MS);
+    for (let t = start; t <= end; t += BEDTIME_PROBE_MS) {
+      const found = restriction(span.deviceId, new Date(t));
+      if (found?.phase !== "enforced" || found.enforcedFrom === undefined) continue;
+      if (found.action === "warn_only") continue;
+      const due =
+        found.enforcedFrom + (found.action === "shutdown" ? (found.graceS ?? 300) * 1000 : 0);
+      if (t < due + BEDTIME_USE_SLACK_MS) continue;
+      const key = `${span.deviceId}|${found.windowId}|${found.enforcedFrom}`;
+      if (seen.has(key)) break;
+      seen.add(key);
+      out.push({
+        deviceId: span.deviceId,
+        kind: "used_in_bedtime",
+        summary: usedInBedtime(found.label, found.action ?? "lock"),
+        occurredAt: new Date(t),
+        policyVersion: null,
+        detail: { label: found.label, action: found.action, window_id: found.windowId },
+      });
+      break;
+    }
+  }
+  return out;
 }
 
 // ── Loading
@@ -559,6 +691,32 @@ export async function loadHistory(request: HistoryRequest): Promise<HistoryResul
       }
       return inForce ? restrictionAt(inForce, at) : null;
     };
+
+    // ★ ADR 0015: unlocked spans during bedtime, merged in as raw rows.
+    const spans = await db
+      .select({
+        deviceId: sessionSpans.deviceId,
+        startedAt: sessionSpans.startedAt,
+        endedAt: sessionSpans.endedAt,
+      })
+      .from(sessionSpans)
+      .where(
+        and(
+          inArray(sessionSpans.deviceId, deviceIds),
+          inArray(sessionSpans.kind, ["awake", "active"]),
+          ...(request.to ? [lt(sessionSpans.startedAt, request.to)] : []),
+          or(isNull(sessionSpans.endedAt), gte(sessionSpans.endedAt, request.from)),
+        ),
+      );
+    const used = bedtimeUse(spans, restriction).filter(
+      (row) =>
+        row.occurredAt.getTime() >= request.from.getTime() &&
+        (!request.to || row.occurredAt.getTime() < request.to.getTime()),
+    );
+    if (used.length > 0) {
+      rows.push(...used);
+      rows.sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
+    }
   }
 
   const presented = presentHistory(rows, contexts, reasons, restriction);

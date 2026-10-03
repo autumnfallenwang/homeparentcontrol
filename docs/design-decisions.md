@@ -239,6 +239,8 @@ every 60 s:
   3. resolve now      — utc_now → policy.timezone (IANA). Never the system timezone. (A.30)
   4. clock sanity     — |Δrealtime − Δcontinuous| > 30 s ⇒ clock.stepped; prefer the monotonic
                         projection from the last server_time until the next successful sync
+                        ⚠️ Unbuilt until 2026-10-03, when a clock set 23 h ahead skipped a
+                        shutdown. Now `TrustedClock`: two of three clocks must agree (ADR 0015)
   5. effective rules  — schedule.windows ∪ policy.overrides[] where expires_at > now
   6. predicate        — is now ∈ [restricted_from, restricted_until) for today's window?
   7. act              — warn / lock / grace / shutdown  (§3.5)
@@ -2258,7 +2260,7 @@ tick a minute. **There is nothing to tune, and no Prometheus for the agent.**
 | **V-PKG-1** | ⚠️ **`sudo installer -pkg … -target /` downgrade in the system domain** | 10 min | §6.1. The user-domain result is ✅; the system domain is 📄 inference. **This gates the whole rollback story** |
 | **V1–V9** | **T4's nine-case enforcement-isolation matrix** — the central unproven claim of the contract | ~2 h | See §8.4 |
 | **V-SLEEP** | `IORegisterForSystemPower` delivery to a root LaunchDaemon on macOS 26, and how much time exists between `kIOMessageSystemWillSleep` and `IOAllowPowerChange` | 30 min | Expect: not enough for a network round-trip. **Confirms the `clean_exit` file must be load-bearing** (§3.8) |
-| **V-NTP** | `systemsetup -getusingnetworktime` from a daemon without FDA | 5 min | A tripwire only |
+| **V-NTP** | `systemsetup -getusingnetworktime` from a daemon without FDA | 5 min | Since ADR 0015 also the agent's "turn automatic time back on"; if unreadable, sync falls back to `settimeofday` from `server_time`. Settled by milestone 07's `agent-e2e.sh` round A |
 | **V-DEADFALL** | `launchd StartCalendarInterval` on wake-from-sleep, and reloading its plist from another daemon | 20 min | §4.6's class-A backstop |
 | **V-ROTATE** | Does `newsyslog` rotate a launchd `StandardOutPath` file for a running root daemon, and does the daemon write to the **new** inode (`lsof -p`)? | 15 min | §7.1. Otherwise the log silently goes to an orphaned inode |
 | **V-LOCK** | **Two independent lock paths plus a boot-time self-test** | 1 h | §3.5. 📄 `ScreenSaverEngine.app` is the next `CGSession`, and macOS 27 has already been reported to have removed the `CGSession` path |

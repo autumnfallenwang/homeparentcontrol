@@ -447,8 +447,18 @@ function summarise(kind: string, data: unknown): string {
       return `Rejected a policy: ${String(d.reason ?? "unknown")}`;
     case "degraded":
       return `Not enforcing: ${String(d.reason ?? "unknown")}`;
-    case "clock_stepped":
-      return "System clock was stepped";
+    case "clock_stepped": {
+      // ADR 0015 — wall − trusted, from agent 0.2.0.
+      const offset = Number(d.offset_s ?? Number.NaN);
+      if (Number.isNaN(offset)) return "System clock was stepped";
+      return Math.abs(offset) <= 60
+        ? "Clock back to the real time"
+        : `Clock set ${Math.round(Math.abs(offset) / 60)} min ${offset > 0 ? "ahead" : "behind"}`;
+    }
+    case "network_time_off":
+      return "Set time automatically was turned off";
+    case "timezone_changed":
+      return `Time zone changed to ${String(d.to ?? "?")}`;
     case "override_granted":
       return `Extra time granted: ${d.minutes ?? "?"} minutes`;
     case "override_expired":

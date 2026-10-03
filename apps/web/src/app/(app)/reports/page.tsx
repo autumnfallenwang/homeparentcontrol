@@ -18,9 +18,11 @@ import { defaultRange, HOURLY_MAX_DAYS, type LocalRange, parseRange } from "../.
  * Three summaries and the history, nothing else:
  * - **Active time**, which is use, not uptime (A.33);
  * - **Startups** — how many times the Mac was turned on;
- * - ★ **After bedtime** — what happened during a rule's watch hours (ADR
- *   0014): a startup, a login, or the Mac on but not reporting. Red, as are
- *   those lines in the history; nothing else on the page is.
+ * - ★ **Flagged** — the parent's review list, red, as are those lines in the
+ *   history; nothing else on the page is. During a rule's watch hours (ADR
+ *   0014): a startup, a login, or the Mac on but not reporting. At any hour
+ *   (ADR 0015): the clock or time zone changed, automatic time turned off,
+ *   or the Mac in use during bedtime when it should have been off or locked.
  *
  * ⚠️ Renders from projected rollups, never raw events: raw samples are pruned
  * at 90 days and rollups outlive them, so a report built on raw data would
@@ -148,9 +150,10 @@ export default function ReportsPage() {
             </Card>
 
             <Card tone={afterBedtime > 0 ? "alarm" : "plain"}>
-              <h2 className="font-heading text-lg font-medium tracking-tight">After bedtime</h2>
+              <h2 className="font-heading text-lg font-medium tracking-tight">Flagged</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Startups, logins, or the Mac on but silent, in a rule's watch hours.
+                Startups, logins or silence after bedtime; use during bedtime; the clock or time
+                zone changed.
               </p>
               <p
                 className={`mt-3 text-3xl font-semibold tabular-nums ${

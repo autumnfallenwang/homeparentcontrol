@@ -28,12 +28,16 @@ enum Supervisor {
     static var state = SupervisorPolicy.State()
     static var lastPids: [String: Int] = [:]
     static var restarts: [Date] = []
-    static let bootedAt = Date()
+    // ⚠️ Trusted time throughout (ADR 0015): the health files it judges are
+    // stamped with it, and the shadow-mode deadline it writes is read by an
+    // enforcer that decides on it. A wall clock here would make a step look
+    // like a dead daemon — or stretch a soak.
+    static let bootedAt = TimeBasis.now()
 
     static let watchedJobs = ["enforcer", "sync"]
 
     static func tick() {
-        let now = Date()
+        let now = TimeBasis.now()
 
         // ── Restart detection. launchd is the only thing that knows a daemon
         // died, and it does not tell anyone — so watch the pid instead. A
@@ -293,7 +297,7 @@ enum Supervisor {
 
     static func writeHealth(decision: String) {
         let row: [String: Any] = [
-            "ts": ISO8601DateFormatter().string(from: Date()),
+            "ts": ISO8601DateFormatter().string(from: TimeBasis.now()),
             "version": version,
             "last_decision": decision,
         ]

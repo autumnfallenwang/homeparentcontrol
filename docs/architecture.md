@@ -8,12 +8,15 @@ API on macOS for a third party to build against, and cannot report the way this 
 
 Two deployables and a contract between them. The **agent** runs on the child's Mac mini as three root
 LaunchDaemons and one periodic one-shot, written in Swift. `enforcerd` ticks every 60 seconds, reads a
-cached policy from disk, compares wall-clock time-of-day against the bedtime window, warns via
+cached policy from disk, compares **trusted** time-of-day against the bedtime window — never the
+Mac's own clock, which the child can set (ADR 0015) — warns via
 `osascript` banners and a `CFUserNotification` dialog, then enforces: lock, a 300-second grace period,
 then shutdown. **It has no network code at all** — that is what makes "bedtime works with the server
 down" a structural property rather than a promise. `sync` is the only component that touches the
 network: it polls for desired policy, drains telemetry from a durable queue on a separate endpoint,
-and writes the cached policy to disk for `enforcerd`. `supervisor` watches both and can reinstall a
+and writes the cached policy to disk for `enforcerd` — and, beside it, the server's word on the time
+(`time.server.json`), which the enforcer carries forward on the continuous clock and outvotes when it
+disagrees with both the Mac's clock and its own reckoning. `supervisor` watches both and can reinstall a
 cached package offline. `deadfall` is a one-shot that fires at each boundary and locks if the enforcer
 is dead.
 
@@ -44,14 +47,19 @@ network.
 ## Key components
 
 - **`HPCCore`** (Swift library) — pure logic, no I/O. Predicate, DST resolver, ladder, cadence,
-  eviction policy, desired-state reconciliation, deadfall schedule, supervisor judgement.
-- **`HPCAgentIO`** (Swift library) — paths, spool, lock effects, kill switch, signing keys. Shared by
-  every executable and **network-free**, which is what lets the enforcer link it.
+  eviction policy, desired-state reconciliation, deadfall schedule, supervisor judgement, and
+  **`TrustedClock`**: wall, server and own reckoning, two must agree
+  ([ADR 0015](./adr/0015-trusted-time.md)).
+- **`HPCAgentIO`** (Swift library) — paths, spool, lock effects, kill switch, signing keys, and
+  `TimeBasis` (the continuous clock, `time.server.json` / `time.state.json`). Shared by every
+  executable and **network-free**, which is what lets the enforcer link it.
 - **`enforcerd`** (Swift, root LaunchDaemon) — the tick loop, warnings and the lock → grace → shutdown
   ladder. Opens no socket, ever. Subject to **Invariant E**: no code path in it may disable enforcement.
 - **`sync`** (Swift, root LaunchDaemon) — the only networked component. Adaptive 60/15/5-second
   cadence the server owns, `queue.sqlite` store-and-forward with two-class eviction, desired-state
   reconciliation, credential rotation, and it generates the deadfall's plist from the active policy.
+  Writes `server_time` to disk for the enforcer, and puts the Mac's clock right when it drifts or is
+  moved — a courtesy; enforcement never depends on it.
 - **`supervisor`** (Swift, root LaunchDaemon, ~300 lines) — watchdog and **offline** rollback from the
   pkg cache. Enforcement-logic-free; never self-updates (A.24). Holds `launchctl kickstart -k`, which
   is the single most dangerous call in the agent, so every rule it follows degrades toward doing

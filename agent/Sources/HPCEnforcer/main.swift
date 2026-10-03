@@ -15,7 +15,8 @@ import HPCCore
 ///   1. kill switch   — fresh from disk, FIRST
 ///   2. load policy   — current; verify JWS; else LKG; else fail open LOUDLY
 ///   3. resolve now   — in the POLICY's zone, never the system's
-///   4. clock sanity
+///   4. clock sanity  — TRUSTED time, never `Date()` (ADR 0015); done first,
+///                      because the kill switch's expiry needs it too
 ///   5. effective rules
 ///   6. predicate
 ///   7. act
@@ -35,8 +36,21 @@ enum Enforcer {
         tickSeq += 1
         var decision = "none"
 
-        // ── 1. Kill switch, first, fresh from disk.
-        let killSwitch = KillSwitch.check()
+        // ── 4, hoisted. The clock everything below decides on.
+        //
+        // ⚠️ Never `Date()`. On 2026-10-03 Ivy set her Mac's clock 23 hours
+        // ahead at midnight and the 00:45 shutdown never came: the predicate
+        // was asking about a Saturday evening that had not happened. Reading
+        // the clock cannot throw and cannot skip anything; it only decides
+        // WHICH instant the rules are asked about.
+        let clock = TimeBasis.resolve(persist: true)
+        let now = clock.now
+        reportClock(clock)
+
+        // ── 1. Kill switch, first of the decisions, fresh from disk. Its
+        //       `until` is judged on trusted time: a clock set back must not
+        //       stretch a time-boxed DISABLE.
+        let killSwitch = KillSwitch.check(now: now)
         if killSwitch.present {
             Spool.append(
                 kind: "enforcement.kill_switch_present",
@@ -85,13 +99,13 @@ enum Enforcer {
         }
 
         // ── 3–6. Resolve, and ask the predicate. Pure, tested, no I/O.
-        let evaluation = BedtimePredicate.evaluate(policy: loaded.document, now: Date())
+        let evaluation = BedtimePredicate.evaluate(policy: loaded.document, now: now)
 
         // ── 7. Act.
         let step = Ladder.step(
             evaluation: evaluation,
             state: ladderState,
-            now: Date(),
+            now: now,
             previousWarning: pendingWarning)
         ladderState = step.state
         pendingWarning = nil
@@ -110,8 +124,9 @@ enum Enforcer {
         // Every ambiguity in `ShadowMode.verdict` resolves to `.enforcing`,
         // and the window has a hard deadline that criteria can only shorten.
         // See `ShadowMode`'s header for the four properties.
+        // Trusted time here too: a clock set back must not stretch the soak.
         let shadow = ShadowMode.verdict(
-            soak: SoakMarker.read(), runningVersion: version, now: Date())
+            soak: SoakMarker.read(), runningVersion: version, now: now)
         if case .shadowing(let until, let shadowVersion) = shadow {
             let would = step.effects.compactMap { effect -> String? in
                 switch effect {
@@ -177,7 +192,35 @@ enum Enforcer {
         Spool.writeHealth(tickSeq: tickSeq, lastDecision: decision, version: version)
     }
 
+    /// `clock.stepped` once per change of the Mac's clock error (ADR 0015).
+    /// Audit class: it outlives a queue overrun and reaches the parent's
+    /// history, where a change away from the real time is red.
+    static func reportClock(_ clock: TrustedClock.Resolution) {
+        let iso = ISO8601DateFormatter()
+        if let step = clock.step {
+            Spool.append(
+                kind: "clock.stepped",
+                detail: [
+                    "offset_s": String(Int(step.to.rounded())),
+                    "previous_offset_s": String(Int(step.from.rounded())),
+                    "source": clock.source.rawValue,
+                    "wall": iso.string(from: clock.now.addingTimeInterval(clock.offset)),
+                    "trusted": iso.string(from: clock.now),
+                ], tickSeq: tickSeq)
+        }
+        if clock.serverOutvotedStarted {
+            // The server disagreed with this Mac's clock AND with our own
+            // reckoning; we enforced on ours. Worth a look at the server.
+            Spool.append(
+                kind: "clock.server_outvoted", detail: ["source": clock.source.rawValue],
+                tickSeq: tickSeq)
+        }
+    }
+
     static func start() {
+        // ★ Every timestamp this process writes is trusted time (ADR 0015).
+        Spool.clock = { TimeBasis.now() }
+
         // §3.8 — report the previous run, then immediately mark this one dirty.
         // ★ `boot_time` says WHICH boot this launch is in (ADR 0014), so the
         // parent's history can tell "turned on" from "restarted" — even for a
@@ -226,6 +269,10 @@ let queue = DispatchQueue(label: "hpc.enforcer", qos: .utility)
 
 let termSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: queue)
 termSource.setEventHandler {
+    // ★ The clock's error, written on the way down: E.4 says launchd delivers
+    // this at shutdown, so a clock moved in the last minute before a restart
+    // is still known to the next boot (ADR 0015, simulation S11).
+    TimeBasis.resolve(persist: true)
     Spool.writeCleanExit(clean: true, reason: "signal", bootId: Enforcer.bootId)
     Spool.append(kind: "agent.stopping", detail: ["reason": "signal"], tickSeq: Enforcer.tickSeq)
     exit(0)

@@ -41,6 +41,9 @@ public enum SpoolReader {
         "policy.applied", "policy.rejected", "policy.unsigned",
         "agent.degraded", "agent.started", "agent.stopping",
         "clock.stepped", "override.granted", "override.expired",
+        // ADR 0015. The last two are enqueued by sync itself, as audit; listed
+        // so this set still reads as the whole of `ENFORCEMENT_LOG_KINDS`.
+        "clock.server_outvoted", "clock.network_time_off", "clock.timezone_changed",
         "queue.evicted", "agent.kill_switch_present",
         "agent.lock_self_test", "agent.decommissioned",
         "supervisor.installed", "supervisor.install_failed", "supervisor.rollback",

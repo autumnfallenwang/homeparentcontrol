@@ -71,6 +71,11 @@ export const ENFORCEMENT_LOG_KINDS: Readonly<Record<string, string>> = Object.fr
   "agent.started": "agent_started",
   "agent.stopping": "agent_stopping",
   "clock.stepped": "clock_stepped",
+  // ADR 0015 — the moves around the rules, from agent 0.2.0. `clock.corrected`
+  // is deliberately absent: the clock coming right shows as a `clock.stepped`
+  // back to zero, and how the agent fixed it is for `events`, not the parent.
+  "clock.network_time_off": "network_time_off",
+  "clock.timezone_changed": "timezone_changed",
   "override.granted": "override_granted",
   "override.expired": "override_expired",
   "queue.evicted": "queue_evicted",

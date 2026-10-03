@@ -23,11 +23,16 @@ public enum SyncDaemon {
     static var tickSeq = 0
     static var halted: String?
     static let bootId = UUID().uuidString.lowercased()
-    static let startedAt = Date()
+    static let startedAt = TimeBasis.now()
+    /// For `uptime_s`: an age, so on the continuous clock.
+    static let startedContinuous = TimeBasis.continuous()
     static var lastEtag: String?
     static var appliedVersion: Int?
     static var evictedSinceLastSync = 0
-    static var lastEventFlush = Date.distantPast
+    /// ⚠️ On the CONTINUOUS clock. It was a wall-clock `Date`, so a clock set
+    /// back an hour made the next flush "due" in an hour: Ivy's Mac sent no
+    /// usage at all from 00:54 on 2026-10-03, after she moved it back.
+    static var lastEventFlush: TimeInterval?
     static var pendingReports: [DesiredReconciler.Report] = []
     static var samplerState = Sampler.State()
 
@@ -120,7 +125,7 @@ public enum SyncDaemon {
         // invisible. The switch now governs the app list only; `Sampler`
         // applies it to `app.usage_sample` and nothing else.
 
-        let observation = SampleSource.observe()
+        let observation = SampleSource.observe(now: now())
         let output = Sampler.sample(observation, state: samplerState, telemetry: config)
         samplerState = output.state
         enqueueSamples(output.events, queue: queue)
@@ -128,7 +133,7 @@ public enum SyncDaemon {
 
     /// Lock and unlock between samples — `Sampler.sessionPoll`.
     static func sessionTick() {
-        guard let queue, let observation = SampleSource.observeSession() else { return }
+        guard let queue, let observation = SampleSource.observeSession(now: now()) else { return }
         let output = Sampler.sessionPoll(observation, state: samplerState)
         samplerState = output.state
         enqueueSamples(output.events, queue: queue)
@@ -235,7 +240,13 @@ public enum SyncDaemon {
 
         // ── 4. The heartbeat. A.26 — the tick IS the heartbeat, and A.27 —
         //       telemetry never rides on it.
+        //
+        // ★ Trusted time first (ADR 0015): read the automatic-time setting and
+        //   resolve the clock, so the heartbeat reports both truthfully.
+        let networkTime = usingNetworkTime()
+        let before = TimeBasis.resolve()
         let response: [String: Any]
+        let sentAt = TimeBasis.continuous()
         do {
             response = try client.sync(syncBody(queue))
             cadence.consecutiveFailures = 0
@@ -245,15 +256,22 @@ public enum SyncDaemon {
             handle(problem)
             cadence.consecutiveFailures += 1
             cadence.retryAfterS = problem.retryAfterS
+            superviseClock(before, networkTime: networkTime)
             writeHealth(decision: "sync_failed:\(problem.status)")
             return nextInterval()
         } catch {
             // §4.6 class D. Unreachable is not a reason to change anything
             // about enforcement; it is a reason to try again later.
             cadence.consecutiveFailures += 1
+            superviseClock(before, networkTime: networkTime)
             writeHealth(decision: "unreachable")
             return nextInterval()
         }
+
+        // ── 4a. The server's word on the time, for the enforcer to carry.
+        recordServerTime(response, sentAt: sentAt, receivedAt: TimeBasis.continuous())
+        offsetAtLastSync = before.offset
+        superviseClock(TimeBasis.resolve(), networkTime: networkTime)
 
         apply(response: response, client: client, queue: queue)
 
@@ -277,7 +295,7 @@ public enum SyncDaemon {
     }
 
     static func nextInterval() -> Int {
-        Cadence.next(cadence, now: Date()).intervalMs
+        Cadence.next(cadence, now: now()).intervalMs
     }
 
     // MARK: - The request body
@@ -295,7 +313,7 @@ public enum SyncDaemon {
 
         var agent: [String: Any] = [
             "started_at": iso(startedAt),
-            "uptime_s": Int(Date().timeIntervalSince(startedAt)),
+            "uptime_s": Int(TimeBasis.continuous() - startedContinuous),
             "tick_seq": tickSeq,
             "clean_exit_previous_run": Spool.readPreviousCleanExit()?.clean ?? false,
             "enforcer_health_age_s": Int(max(0, enforcer.ageS)),
@@ -321,7 +339,7 @@ public enum SyncDaemon {
             policyState["using_lkg"] = policy.source == .lastKnownGood
             policyState["signature_valid"] = policy.signatureValid
             policyState["source"] = policy.source.rawValue
-            policyState["age_s"] = Int(max(0, Date().timeIntervalSince(policy.document.issuedAt)))
+            policyState["age_s"] = Int(max(0, now().timeIntervalSince(policy.document.issuedAt)))
         }
 
         var enforcement: [String: Any] = ["state": enforcer.lastDecision ?? "unknown"]
@@ -349,21 +367,6 @@ public enum SyncDaemon {
                 if let detail = report.detail { row["detail"] = detail }
                 return row
             },
-        ]
-    }
-
-    static func clockBlock(_ policy: PolicyStore.Loaded?) -> [String: Any] {
-        [
-            "local_utc": iso(Date()),
-            "system_timezone": TimeZone.current.identifier,
-            // ⚠️ A.30 — the POLICY's zone is the one that governs, and
-            // reporting it separately is what lets the server notice the two
-            // have diverged without the agent having to decide what that means.
-            "policy_timezone": policy?.document.timezone ?? TimeZone.current.identifier,
-            "using_network_time": true,
-            "continuous_ns": ProcessInfo.processInfo.systemUptime * 1_000_000_000,
-            "skew_estimate_ms": 0,
-            "stepped_since_last_sync": false,
         ]
     }
 
@@ -439,7 +442,8 @@ public enum SyncDaemon {
     static func rewriteDeadfall() {
         guard let policy = loadedPolicy() else { return }
         let entries = DeadfallSchedule.entries(
-            policy: policy.document, now: Date(), systemZone: TimeZone.current)
+            policy: policy.document, now: now(), systemZone: TimeZone.current,
+            wallOffset: TimeBasis.last?.offset ?? 0)
         let plist = DeadfallSchedule.plist(
             entries: entries, programPath: Paths.deadfallBinary)
 
@@ -477,7 +481,7 @@ public enum SyncDaemon {
     static func rotateIfDue(_ client: Client) {
         guard let credential = DeviceState.loadCredential(),
               let rotateAfter = credential.rotateAfter,
-              rotateAfter <= Date()
+              rotateAfter <= now()
         else { return }
         rotate(client, desiredId: "")
     }
@@ -501,7 +505,7 @@ public enum SyncDaemon {
                 .init(
                     token: token,
                     keyId: credential["key_id"] as? String ?? current.keyId,
-                    issuedAt: Date(),
+                    issuedAt: now(),
                     rotateAfter: (credential["rotate_after"] as? String)
                         .flatMap(ISO8601DateFormatter.hpcParse),
                     previousToken: current.token))
@@ -566,8 +570,9 @@ public enum SyncDaemon {
 
     static func flushEventsIfDue(_ client: Client, _ queue: Queue) {
         let census = (try? queue.census()) ?? .init()
-        let due = Date().timeIntervalSince(lastEventFlush)
-            >= TimeInterval(telemetry().flushIntervalS)
+        let due = lastEventFlush.map {
+            TimeBasis.continuous() - $0 >= TimeInterval(telemetry().flushIntervalS)
+        } ?? true
         // "immediately for any `class: audit` event" — an enforcement action
         // must not wait five minutes to become visible to a worried parent.
         guard due || census.auditCount > 0 else { return }
@@ -587,7 +592,7 @@ public enum SyncDaemon {
                     .compactMap { $0["event_id"] as? String }
                 try? queue.acknowledge(rejected)
 
-                lastEventFlush = Date()
+                lastEventFlush = TimeBasis.continuous()
                 if accepted.count + rejected.count < rows.count { break }
             } catch let problem as Client.Problem {
                 if problem.action == .halveBatch { size = max(1, size / 2); continue }
@@ -624,7 +629,8 @@ public enum SyncDaemon {
 
     static func applyEviction(_ queue: Queue) {
         guard let census = try? queue.census() else { return }
-        let plan = QueuePolicy.plan(census: census, limits: limits(), now: Date())
+        // Trusted time: a clock set 15 days ahead must not age the queue out.
+        let plan = QueuePolicy.plan(census: census, limits: limits(), now: now())
         guard !plan.isEmpty, let evicted = try? queue.evict(plan), evicted.total > 0 else { return }
 
         evictedSinceLastSync += evicted.total
@@ -710,7 +716,7 @@ public enum SyncDaemon {
 
     static func nextBoundary() -> Date? {
         guard let policy = loadedPolicy() else { return nil }
-        return BedtimePredicate.evaluate(policy: policy.document, now: Date()).nextBoundaryAt
+        return BedtimePredicate.evaluate(policy: policy.document, now: now()).nextBoundaryAt
     }
 
     static func readEnforcerHealth() -> (writtenAt: Date?, lastDecision: String?, ageS: TimeInterval) {
@@ -720,7 +726,7 @@ public enum SyncDaemon {
         let writtenAt = (row["ts"] as? String).flatMap(ISO8601DateFormatter.hpcParse)
         return (
             writtenAt, row["last_decision"] as? String,
-            writtenAt.map { Date().timeIntervalSince($0) } ?? 86_400
+            writtenAt.map { now().timeIntervalSince($0) } ?? 86_400
         )
     }
 
@@ -739,12 +745,12 @@ public enum SyncDaemon {
     // MARK: - Small things
 
     static func enqueueLocal(type: String, cls: QueuePolicy.Class, data: [String: Any]) {
-        try? queue?.enqueue([.init(type: type, cls: cls, bootId: bootId, data: data)])
+        try? queue?.enqueue([.init(ts: now(), type: type, cls: cls, bootId: bootId, data: data)])
     }
 
     static func writeHealth(decision: String) {
         let row: [String: Any] = [
-            "ts": iso(Date()), "tick_seq": tickSeq, "version": version,
+            "ts": iso(now()), "tick_seq": tickSeq, "version": version,
             "last_decision": decision,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: row) else { return }

@@ -19,7 +19,7 @@ public enum AgentVersion {
     /// Bumped here and nowhere else. `build-pkg.sh` refuses a version argument
     /// that disagrees, because a pkg whose version differs from what its
     /// binaries report makes the supervisor's `isNewer` install it forever.
-    public static let base = "0.1.0"
+    public static let base = "0.2.0"
 
     #if DEV_ENFORCEMENT
         public static let isSafeVariant = true

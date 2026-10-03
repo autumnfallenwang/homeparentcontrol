@@ -65,8 +65,15 @@ public enum DeadfallSchedule {
     ///
     /// Pure. `systemZone` is passed in rather than read from `TimeZone.current`
     /// so the zone-mismatch case is testable without touching the machine.
+    ///
+    /// ⚠️ **`wallOffset` is the zone trap's twin, for the clock** (ADR 0015).
+    /// launchd fires on the Mac's WALL clock, so with the clock set two hours
+    /// back every entry fired two hours late. `now` is trusted time and
+    /// `wallOffset` is wall − trusted; each instant is rendered at the wall
+    /// time that will read on the Mac when that instant really arrives. The
+    /// sync daemon rewrites the plist whenever the offset moves.
     public static func entries(
-        policy: PolicyDocument, now: Date, systemZone: TimeZone
+        policy: PolicyDocument, now: Date, systemZone: TimeZone, wallOffset: TimeInterval = 0
     ) -> [Entry] {
         var instants: Set<Date> = []
 
@@ -108,7 +115,8 @@ public enum DeadfallSchedule {
         var seen: Set<Entry> = []
         var result: [Entry] = []
         for instant in instants.sorted() {
-            let parts = calendar.dateComponents([.weekday, .hour, .minute], from: instant)
+            let parts = calendar.dateComponents(
+                [.weekday, .hour, .minute], from: instant.addingTimeInterval(wallOffset))
             guard let weekday = parts.weekday, let hour = parts.hour, let minute = parts.minute
             else { continue }
             let entry = Entry(

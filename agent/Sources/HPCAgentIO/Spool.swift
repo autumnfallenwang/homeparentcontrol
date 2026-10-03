@@ -9,10 +9,16 @@ import Foundation
 /// hour of Minecraft.
 public enum Spool {
 
+    /// Where every timestamp in this file comes from. The enforcer and the
+    /// deadfall point it at `TimeBasis.now` (ADR 0015): a spool stamped by the
+    /// Mac's clock puts a bedtime shutdown at whatever hour the child chose,
+    /// and every reader of `enforcer.health` judges ages on trusted time too.
+    public static var clock: () -> Date = { Date() }
+
     /// Append one event. Failures are swallowed on purpose — see above.
     public static func append(kind: String, detail: [String: String], tickSeq: Int) {
         var row: [String: Any] = [
-            "ts": ISO8601DateFormatter().string(from: Date()),
+            "ts": ISO8601DateFormatter().string(from: clock()),
             "event": kind,
             "seq": tickSeq,
         ]
@@ -44,7 +50,7 @@ public enum Spool {
     /// reads it back to decide anything.
     public static func writeHealth(tickSeq: Int, lastDecision: String, version: String) {
         let row: [String: Any] = [
-            "ts": ISO8601DateFormatter().string(from: Date()),
+            "ts": ISO8601DateFormatter().string(from: clock()),
             "tick_seq": tickSeq,
             "version": version,
             "last_decision": lastDecision,
@@ -63,10 +69,10 @@ public enum Spool {
     public static func writeCleanExit(clean: Bool, reason: String?, bootId: String) {
         var row: [String: Any] = ["clean": clean, "boot_id": bootId]
         if clean {
-            row["stopped_at"] = ISO8601DateFormatter().string(from: Date())
+            row["stopped_at"] = ISO8601DateFormatter().string(from: clock())
             row["reason"] = reason ?? "signal"
         } else {
-            row["started_at"] = ISO8601DateFormatter().string(from: Date())
+            row["started_at"] = ISO8601DateFormatter().string(from: clock())
         }
         guard let data = try? JSONSerialization.data(withJSONObject: row) else { return }
         // fsync, because the machine is about to stop existing.

@@ -53,8 +53,9 @@ public enum Effects {
         // ⚠️ Bounded. A notifier that hangs must not hang the tick — the tick
         // is the heartbeat, and a stuck warning would make a live agent look
         // silent.
-        let deadline = Date().addingTimeInterval(timeout)
-        while task.isRunning && Date() < deadline {
+        // On the continuous clock: a wall-clock deadline is what a step breaks.
+        let deadline = TimeBasis.continuous() + timeout
+        while task.isRunning && TimeBasis.continuous() < deadline {
             usleep(100_000)
         }
         if task.isRunning {

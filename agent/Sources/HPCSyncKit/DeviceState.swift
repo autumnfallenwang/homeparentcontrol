@@ -127,8 +127,11 @@ public enum DeviceState {
 
     public static func hostname() -> String { ProcessInfo.processInfo.hostName }
 
+    /// Trusted now − uptime (ADR 0015). The server stamps a power-on with
+    /// this, so on the Mac's own clock a boot would land at whatever hour the
+    /// child had set.
     public static func systemBootTime() -> Date {
-        Date(timeIntervalSinceNow: -ProcessInfo.processInfo.systemUptime)
+        TimeBasis.now().addingTimeInterval(-ProcessInfo.processInfo.systemUptime)
     }
 
     static func shell(_ path: String, _ args: [String]) -> String {

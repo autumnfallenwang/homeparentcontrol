@@ -1,6 +1,6 @@
 # The punch list
 
-Everything outstanding in the project, in one place, as of **2026-09-26**.
+Everything outstanding in the project, in one place, as of **2026-10-03**.
 
 ✅ **The cluster deploy is done.** `homeparentcontrol` is Healthy on k3s, both
 ingress hosts answer, and all nine end-to-end tests pass against it with
@@ -20,6 +20,17 @@ or a decision. That is why no milestone is `open` — see `CLAUDE.md`'s note on
 
 Grouped by *what you need in your hand*, because that is how these actually
 get done — not by milestone.
+
+> ⛔ **2026-10-03 — Ivy beat bedtime by moving her Mac's clock 23 h ahead.** Fixed in agent 0.2.0
+> (ADR 0015, milestone 07); the server half is deployed. **Two things need a person:**
+>
+> 1. `sudo tools/verify/clock-tamper/agent-e2e.sh agent/.build/pkg/homeparentcontrol-0.2.0.pkg /tmp/clock-e2e`
+>    on Aaron's Macbook (no bedtime window, so safe) — the real agent against a moved clock.
+> 2. Install 0.2.0 on Ivy's Mac mini — milestone 07, *Installing on Ivy's Mac*. Until then her
+>    agent still follows her clock, which was 22 h ahead at 02:00.
+>
+> And C6 (an alert channel) matters more than it did: the server knew within 34 seconds and raised
+> `clock_skew` 84 times, and nobody was told.
 
 ---
 

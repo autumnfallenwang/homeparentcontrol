@@ -25,10 +25,17 @@ enum Deadfall {
     static let version = AgentVersion.current
 
     static func run() -> Int32 {
+        // ── 0. Trusted time (ADR 0015). On 2026-10-03 this process ran at
+        //       00:00:30 on a clock set to "Saturday 23:00" and reported
+        //       `restricted: false`. It reads the enforcer's state and the
+        //       server's last word; it writes neither — one writer each.
+        Spool.clock = { TimeBasis.now() }
+        let now = TimeBasis.resolve().now
+
         // ── 1. The kill switch, first and fresh, exactly as §3.2 orders it
         //       for the enforcer. A deadfall that ignored DISABLE would make
         //       the emergency control a lie the one night it is needed.
-        let killSwitch = KillSwitch.check()
+        let killSwitch = KillSwitch.check(now: now)
         if killSwitch.present {
             log("kill_switch_present", ["indefinite": String(killSwitch.indefinite)])
             return 0
@@ -55,7 +62,7 @@ enum Deadfall {
         //       the design document singles out, and it is free here only
         //       because the predicate is pure and already tested: a holiday
         //       grant relaxes the deadfall exactly as it relaxes the enforcer.
-        let evaluation = BedtimePredicate.evaluate(policy: loaded.document, now: Date())
+        let evaluation = BedtimePredicate.evaluate(policy: loaded.document, now: now)
 
         guard evaluation.isRestricted else {
             // The common case by a wide margin: the enforcer is alive and this
@@ -72,7 +79,7 @@ enum Deadfall {
         // is a *positive* reading that the enforcer ticked within the last
         // five minutes — because then it has already locked, and a second
         // lock is noise. Every ambiguity resolves toward locking.
-        if enforcerIsAlive() {
+        if enforcerIsAlive(now: now) {
             log("evaluated", ["restricted": "true", "action": "deferred_to_enforcer"])
             return 0
         }
@@ -93,13 +100,14 @@ enum Deadfall {
     }
 
     /// A positive, recent heartbeat — and nothing else — counts as alive.
-    static func enforcerIsAlive() -> Bool {
+    static func enforcerIsAlive(now: Date) -> Bool {
         guard let data = FileManager.default.contents(atPath: Paths.health),
               let row = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let ts = row["ts"] as? String,
               let writtenAt = ISO8601DateFormatter.hpcParse(ts)
         else { return false }
-        let age = Date().timeIntervalSince(writtenAt)
+        // Both sides trusted time: the enforcer stamps its health with it.
+        let age = now.timeIntervalSince(writtenAt)
         // A future timestamp means the clock moved, not that the enforcer is
         // healthy. Treat it as dead, because the cost of a redundant lock is a
         // locked screen the child unlocks; the cost of the other mistake is
@@ -116,7 +124,7 @@ enum Deadfall {
         detail["source"] = "deadfall"
         detail["deadfall_version"] = version
         Spool.append(kind: "enforcement.\(kind)", detail: detail, tickSeq: -1)
-        try? Data(ISO8601DateFormatter().string(from: Date()).utf8)
+        try? Data(ISO8601DateFormatter().string(from: Spool.clock()).utf8)
             .write(to: URL(fileURLWithPath: Paths.deadfallState), options: .atomic)
     }
 }

@@ -199,12 +199,13 @@ public enum SampleSource {
         task.standardError = FileHandle.nullDevice
         guard (try? task.run()) != nil else { return "" }
 
-        let deadline = Date().addingTimeInterval(probeTimeout)
+        // On the continuous clock: a wall-clock deadline is what a step breaks.
+        let deadline = TimeBasis.continuous() + probeTimeout
         // Read first: a child that fills the pipe buffer blocks on write and
         // never exits, so waiting before reading deadlocks on exactly the
         // large outputs `ioreg` produces.
         let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
-        while task.isRunning && Date() < deadline { usleep(20_000) }
+        while task.isRunning && TimeBasis.continuous() < deadline { usleep(20_000) }
         if task.isRunning { task.terminate() }
         return String(decoding: data, as: UTF8.self)
     }

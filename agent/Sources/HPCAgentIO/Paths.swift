@@ -19,6 +19,12 @@ public enum Paths {
     /// sync beside the policy, so a restarted daemon still knows which rules
     /// it holds.
     public static var policyEtag: String { "\(root)/policy.etag.json" }
+    /// The server's word on the time, from the last sync (ADR 0015). Written
+    /// by sync, read by everyone — the enforcer's only window on the server.
+    public static var timeServer: String { "\(root)/time.server.json" }
+
+    // ── Trusted time's memory: written by the enforcer, read by the rest.
+    public static var timeState: String { "\(root)/time.state.json" }
 
     // ── The enforcer's own state.
     public static var cleanExit: String { "\(root)/clean_exit" }

@@ -81,13 +81,17 @@ export function createApp() {
    * `contract_versions` is plural in the contract: the minors this server
    * speaks (R3 — major in the path, minor in a field).
    */
-  app.get("/api/agent/v1/health", (c) =>
-    c.json({
+  app.get("/api/agent/v1/health", (c) => {
+    // ⚠️ `no-store`: this carries `server_time`, and a cached copy is a stale
+    // clock. Observed 2026-10-03: after every backwards clock step, macOS's
+    // URLSession served the previous reply from its cache (ADR 0015).
+    c.header("Cache-Control", "no-store");
+    return c.json({
       status: "ok",
       contract_versions: [CONTRACT_MINOR],
       server_time: new Date().toISOString(),
-    }),
-  );
+    });
+  });
 
   app.route("/api/parent/v1", parentApp);
 

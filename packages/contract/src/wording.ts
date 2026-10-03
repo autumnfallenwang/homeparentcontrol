@@ -351,14 +351,19 @@ export function tripwirePhrasing(kind: string, subject: Subject): TripwirePhrasi
       return {
         severity: "warn",
         summary: `${deviceLabel} is no longer syncing its clock with the network.`,
-        // ⚠️ Worth saying plainly: the clock is not a way around bedtime.
-        benign: "Bedtime still applies — the rules use the timezone in the policy, not the Mac's.",
+        // ⚠️ This used to say the clock was not a way around bedtime. It was:
+        // on 2026-10-03 a clock set 23 h ahead skipped a shutdown. Since
+        // agent 0.2.0 bedtime runs on trusted time and the agent turns this
+        // back on; older agents can still be fooled.
+        benign:
+          "From agent 0.2.0 bedtime still applies, and the agent turns it back on. An older agent can be fooled by the clock.",
       };
     case "clock_skew":
       return {
         severity: "warn",
         summary: `${deviceLabel}'s clock doesn't match the real time.`,
-        benign: "A Mac whose date was changed by hand, or that lost network time, looks like this.",
+        benign:
+          "From agent 0.2.0 bedtime follows the real time anyway, and the agent puts the clock back. An older agent follows the Mac's clock.",
       };
     case "timezone_mismatch":
       return {

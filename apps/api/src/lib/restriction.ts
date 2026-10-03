@@ -33,6 +33,8 @@ interface DocumentWindow {
   restricted_from?: string;
   restricted_until?: string;
   watch_until?: string;
+  action?: string;
+  action_options?: { shutdown_grace_s?: number };
 }
 
 interface DocumentOverride {
@@ -48,6 +50,12 @@ export interface Restriction {
   windowId: string;
   /** The parent's own name for the rule. */
   label: string;
+  /** When enforcement began tonight, in ms — after any extra time. Enforced phase only. */
+  enforcedFrom?: number;
+  /** `lock`, `shutdown` or `warn_only`. Enforced phase only. */
+  action?: string;
+  /** Seconds between the lock and the shutdown. Enforced phase only. */
+  graceS?: number;
 }
 
 const HHMM = /^(\d{2}):(\d{2})$/;
@@ -103,7 +111,16 @@ export function restrictionAt(document: RestrictionDocument, at: Date): Restrict
       if (t >= effectiveFrom && t < until) {
         // Latest-ending window wins when two overlap, as on the Mac.
         if (!enforced || until > enforced.until) {
-          enforced = { restriction: { phase: "enforced", ...restriction }, until };
+          enforced = {
+            restriction: {
+              phase: "enforced",
+              ...restriction,
+              enforcedFrom: effectiveFrom,
+              action: window.action ?? "lock",
+              graceS: window.action_options?.shutdown_grace_s ?? 300,
+            },
+            until,
+          };
         }
         continue;
       }
