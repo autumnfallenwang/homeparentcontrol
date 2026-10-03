@@ -44,9 +44,13 @@ real time, automatic time off, time zone changed, in use during bedtime), "Flagg
       fix landed before `installer` had noticed the install was done, and it hung on a 22-hour
       wall-clock wait (the install itself had completed — `install.log`); and the enforcer never
       measured the step, so `clock.corrected` — then not a history kind — was the only record.
-- [ ] 0.2.1 on Ivy's Mac at the next convenient reinstall (no urgency: the fix is install-time only),
-      and `sudo launchctl kickstart -k system/com.hpc.supervisor` after any manual install — the
-      postinstall deliberately never restarts the supervisor (A.24), so it keeps running the old code.
+- [x] **0.2.1 on Ivy's Mac** — 04:04 on 3 Oct, then `sudo launchctl kickstart -k
+      system/com.hpc.supervisor` (the postinstall never restarts the supervisor, A.24, so it would
+      keep running the old code until the next boot). ⚠️ The first 0.2.1 attempt hung *before*
+      installing — still 0.2.0 on the server, no `installd` work in progress. Most likely the 0.2.0
+      install's 22-hour clock jump left the install service wedged. A restart over SSH
+      (`fdesetup authrestart` when FileVault is on, so the Mac does not stop at the unlock screen)
+      cleared it, and the install then ran normally. The agent was up 6 s after boot.
 - [ ] ⛔ **One real bedtime on her Mac with 0.2.0** — shutdown on time. And, if she tries the clock
       again, the red rows within a minute of it.
 
@@ -64,6 +68,10 @@ She is enrolled, so this is an upgrade: the base URL and credential stay where t
 4. Within a minute her device page shows **Agent 0.2.0**, and her clock is right.
 
 ## Progress notes
+
+- 2026-10-03 04:04 — Ivy's Mac on 0.2.1 after a restart; HEALTHY, clock right, no clock tripwire
+  since 03:35:29. Left: one real bedtime (Sunday 23:45), and optionally `agent-e2e.sh` here for the
+  enforcer-measured path (round C), which her install never exercised.
 
 - 2026-10-03 03:35 — 0.2.0 on Ivy's Mac; her clock right within seconds. 0.2.1: no clock fixes in
   sync's first 120 s; `clock.corrected` is a history kind (red when it is the only record).
