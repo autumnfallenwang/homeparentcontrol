@@ -85,23 +85,8 @@ export function HealthCard({ card, children }: { card: DeviceCard; children?: Re
         <p className="mt-1 text-sm text-foreground/85">{phrasing.reassurance}</p>
       ) : null}
 
-      {/* ★ ONE banner, and a count for the rest. */}
-      {card.banner ? (
-        <div className="mt-3">
-          <Banner tone={card.banner.severity} title={card.banner.summary}>
-            {card.banner.benign ? <p>{card.banner.benign}</p> : null}
-            {card.banner.also_open > 0 ? (
-              <p className="mt-1 text-xs opacity-75">
-                <Link href={`/devices/${card.device_id}`} className="underline">
-                  {card.banner.also_open === 1
-                    ? "and 1 other"
-                    : `and ${card.banner.also_open} others`}
-                </Link>
-              </p>
-            ) : null}
-          </Banner>
-        </div>
-      ) : null}
+      {/* No tripwire banner here any more (2026-10-04): Today's "Flagged"
+          list carries what needs a look. */}
 
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div>

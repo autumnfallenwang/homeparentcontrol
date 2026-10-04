@@ -6,12 +6,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { GrantButtons, type PendingGrant } from "../../components/grant-buttons.js";
 import { cardPhrasing, cardSubject, HealthCard } from "../../components/health-card.js";
+import { HistoryList } from "../../components/history-list.js";
 import { Page } from "../../components/shell/page.js";
 import { useViewing } from "../../components/shell/viewing.js";
 import { Banner, ErrorNote, Spinner, type Tone } from "../../components/ui.js";
 import { humanMinutes } from "../../lib/format.js";
 import { settlePending } from "../../lib/grant-progress.js";
-import { type DeviceCard, getToday } from "../../lib/parent-api.js";
+import { type DeviceCard, getReports, getToday, type HistoryItem } from "../../lib/parent-api.js";
 import { needsAttention } from "../../lib/selected-child.js";
 
 /**
@@ -39,6 +40,17 @@ import { needsAttention } from "../../lib/selected-child.js";
  */
 const IDLE_POLL_MS = 30_000;
 const WATCHING_POLL_MS = 5_000;
+
+/**
+ * ★ What needs a look: the red rows of the last 7 days (2026-10-04, owner's
+ * call), from the same history Activity shows — not the tripwire banners,
+ * which said "no longer syncing its clock" long after it was fixed.
+ *
+ * Its own slow refresh: a 7-day history read is heavier than the 30 s Today
+ * poll should carry, and nothing in it is urgent to the second.
+ */
+const FLAGGED_DAYS = 7;
+const FLAGGED_POLL_MS = 5 * 60_000;
 
 export default function TodayPage() {
   const viewing = useViewing();
@@ -78,6 +90,31 @@ export default function TodayPage() {
   }, [allCards]);
 
   const childId = viewing.child?.id ?? null;
+  const [flagged, setFlagged] = useState<HistoryItem[] | null>(null);
+  const loadFlagged = useCallback(async () => {
+    // Never unscoped — the same rule as Activity: one child's page.
+    if (!childId) return;
+    try {
+      const now = new Date();
+      const report = await getReports({
+        grain: "hour",
+        child_id: childId,
+        from: new Date(now.getTime() - FLAGGED_DAYS * 86_400_000).toISOString(),
+        to: now.toISOString(),
+      });
+      setFlagged(report.enforcement.filter((row) => row.tone === "alarm"));
+    } catch (caught) {
+      setError(caught);
+    }
+  }, [childId]);
+
+  useEffect(() => {
+    setFlagged(null);
+    void loadFlagged();
+    const interval = setInterval(loadFlagged, FLAGGED_POLL_MS);
+    return () => clearInterval(interval);
+  }, [loadFlagged]);
+
   const cards = useMemo(
     () => allCards?.filter((card) => card.child?.id === childId) ?? null,
     [allCards, childId],
@@ -139,6 +176,31 @@ export default function TodayPage() {
               </Banner>
             </Link>
           ))}
+        </section>
+      ) : null}
+
+      {ready && viewing.child && cards.length > 0 ? (
+        <section aria-label="Flagged" className="space-y-1">
+          <div className="flex items-baseline justify-between gap-2">
+            <h2 className="font-heading text-lg font-medium tracking-tight">
+              Flagged — last {FLAGGED_DAYS} days
+            </h2>
+            <Link
+              href="/reports"
+              className="text-[13px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Activity
+            </Link>
+          </div>
+          {flagged === null ? (
+            <Spinner />
+          ) : (
+            <HistoryList
+              rows={flagged}
+              limit={20}
+              empty={`Nothing flagged in the last ${FLAGGED_DAYS} days.`}
+            />
+          )}
         </section>
       ) : null}
 
@@ -261,14 +323,6 @@ function needsYou(cards: DeviceCard[]): AttentionItem[] {
         tone: phrasing.tone as Tone,
         title: phrasing.headline,
         detail: phrasing.reassurance ?? undefined,
-      });
-    }
-    if (card.banner) {
-      items.push({
-        key: `${card.device_id}:banner`,
-        href,
-        tone: card.banner.severity as Tone,
-        title: `${card.label ?? "A Mac"}: ${card.banner.summary}`,
       });
     }
   }

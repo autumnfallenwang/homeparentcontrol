@@ -34,9 +34,15 @@ export function pickChild(
   return (reachable ?? children[0])?.id ?? null;
 }
 
-/** A device that needs a person: not enforcing, not healthy, or a tripwire. */
+/**
+ * A device that needs a person: not enforcing, or not healthy.
+ *
+ * ⚠️ Not a tripwire (2026-10-04, owner's call). "No longer syncing its clock"
+ * stayed up for days after the agent had put the clock right; what needs a
+ * look is in Today's red list, from the same history as Activity.
+ */
 export function needsAttention(card: DeviceCard): boolean {
-  return card.shadow_mode || card.health.state !== "HEALTHY" || card.banner !== null;
+  return card.shadow_mode || card.health.state !== "HEALTHY";
 }
 
 /**

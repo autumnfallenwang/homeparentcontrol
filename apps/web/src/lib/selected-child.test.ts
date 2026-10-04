@@ -58,12 +58,12 @@ describe("childrenNeedingYou", () => {
     expect([...childrenNeedingYou(cards)]).toEqual(["max"]);
   });
 
-  it("counts a Mac that is not enforcing yet, and a tripwire", () => {
+  it("counts a Mac that is not enforcing yet — and not a tripwire on its own", () => {
     const cards = [
       card("lucy", { shadow_mode: true }),
       card("max", { banner: {} as DeviceCard["banner"] }),
     ];
-    expect([...childrenNeedingYou(cards)].sort()).toEqual(["lucy", "max"]);
+    expect([...childrenNeedingYou(cards)]).toEqual(["lucy"]);
   });
 
   it("ignores a device that belongs to no child", () => {
